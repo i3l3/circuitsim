@@ -51,11 +51,11 @@ function getItemTermPos(item: Item, side: "A" | "B"): { x: number; y: number } {
 }
 
 function getCenteredInitialCircuit(viewportW: number, viewportH: number) {
-    const items: Item[] = defaultCircuit.items.map(item => ({ ...item }));
+    const items: Item[] = defaultCircuit.items.map(item => ({ ...item } as Item));
     const wires: Wire[] = defaultCircuit.wires.map(wire => ({
         ...wire,
-        from: { ...wire.from },
-        to: { ...wire.to },
+        from: { ...wire.from } as Terminal,
+        to: { ...wire.to } as Terminal,
         bendPoints: wire.bendPoints.map(bp => ({ ...bp })),
     }));
     const nodes: WireNode[] = defaultCircuit.nodes.map(node => ({ ...node }));
