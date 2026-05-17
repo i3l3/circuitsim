@@ -13,7 +13,7 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
     items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
     drawingWire: DrawingWire | null;
     onTerminalMouseDown: (t: Terminal, p: { x: number; y: number }, e: Konva.KonvaEventObject<MouseEvent>) => void;
-    onBodyClick: (uuid: string) => void;
+    onBodyClick: (uuid: string, e: Konva.KonvaEventObject<MouseEvent>) => void;
     selected: boolean;
     onDragEnd: (uuid: string) => void;
     simCurrent?: number;
@@ -41,7 +41,7 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
                onDragEnd={() => onDragEnd(uuid)}>
             <Rect x={0} y={0} width={100} height={50} fill="transparent"
                   stroke={selected ? "#3b82f6" : "transparent"} strokeWidth={2} cornerRadius={4}
-                  onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid); }} />
+                  onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid, e); }} />
             <Line points={ZZ} stroke="#333" strokeWidth={2.5} lineCap="round" lineJoin="round" listening={false} />
             <Text x={10} y={-14} text={formatUnit(value, "Ω")} fontSize={12} fill="#555" listening={false} />
             {simCurrent !== undefined && simVoltage !== undefined && (

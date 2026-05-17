@@ -187,3 +187,143 @@ export function solveCircuit(items: Item[], nodes: WireNode[], wires: Wire[]): S
         success: true
     };
 }
+
+export function calculatePartialResistance(selectedUuids: string[], items: Item[], wires: Wire[]): number | undefined {
+    const selectedItems = items.filter(i => selectedUuids.includes(i.uuid) && i.type === "resistor");
+    if (selectedItems.length === 0) return undefined;
+    if (selectedItems.length === 1) return selectedItems[0].value || 100;
+
+    const parent: Record<string, string> = {};
+    const find = (i: string): string => {
+        if (parent[i] === undefined) parent[i] = i;
+        if (parent[i] === i) return i;
+        return parent[i] = find(parent[i]);
+    };
+    const union = (i: string, j: string) => {
+        const rootI = find(i);
+        const rootJ = find(j);
+        if (rootI !== rootJ) parent[rootI] = rootJ;
+    };
+
+    // Union all wires
+    for (const w of wires) union(termKey(w.from), termKey(w.to));
+
+    // Find all nets involved in the selected items
+    const involvedNets = new Set<string>();
+    const netDegrees: Record<string, number> = {};
+
+    for (const item of selectedItems) {
+        const tA = find(termKey({ type: "item", itemUuid: item.uuid, side: "A" }));
+        const tB = find(termKey({ type: "item", itemUuid: item.uuid, side: "B" }));
+        involvedNets.add(tA);
+        involvedNets.add(tB);
+        netDegrees[tA] = (netDegrees[tA] || 0) + 1;
+        netDegrees[tB] = (netDegrees[tB] || 0) + 1;
+    }
+
+    // A net is an "external terminal" if it has degree 1 in the sub-circuit,
+    // OR if it connects to any unselected item.
+    const externalNets = new Set<string>();
+    for (const net of involvedNets) {
+        if (netDegrees[net] === 1) {
+            externalNets.add(net);
+        } else {
+            // Check if it connects to an unselected item
+            let connectsToOutside = false;
+            for (const item of items) {
+                if (selectedUuids.includes(item.uuid)) continue;
+                const tA = find(termKey({ type: "item", itemUuid: item.uuid, side: "A" }));
+                const tB = find(termKey({ type: "item", itemUuid: item.uuid, side: "B" }));
+                if (tA === net || tB === net) connectsToOutside = true;
+            }
+            if (connectsToOutside) externalNets.add(net);
+        }
+    }
+
+    // Compute approximate physical center of each net to find the "ends" of the circuit
+    const netPos: Record<string, { x: number, y: number, c: number }> = {};
+    for (const item of selectedItems) {
+        const tA = find(termKey({ type: "item", itemUuid: item.uuid, side: "A" }));
+        const tB = find(termKey({ type: "item", itemUuid: item.uuid, side: "B" }));
+        // Approximate terminal positions
+        const rad = (item.rotation || 0) * Math.PI / 180;
+        const dxA = 0, dyA = 25; // Side A relative to item
+        const dxB = 100, dyB = 25; // Side B relative to item
+        
+        const pxA = item.x + dxA * Math.cos(rad) - dyA * Math.sin(rad);
+        const pyA = item.y + dxA * Math.sin(rad) + dyA * Math.cos(rad);
+        const pxB = item.x + dxB * Math.cos(rad) - dyB * Math.sin(rad);
+        const pyB = item.y + dxB * Math.sin(rad) + dyB * Math.cos(rad);
+
+        if (!netPos[tA]) netPos[tA] = { x: 0, y: 0, c: 0 };
+        netPos[tA].x += pxA; netPos[tA].y += pyA; netPos[tA].c++;
+
+        if (!netPos[tB]) netPos[tB] = { x: 0, y: 0, c: 0 };
+        netPos[tB].x += pxB; netPos[tB].y += pyB; netPos[tB].c++;
+    }
+
+    const candidateNets = externalNets.size >= 2 ? Array.from(externalNets) : Array.from(involvedNets);
+    if (candidateNets.length < 2) return undefined;
+
+    let maxDist = -1;
+    let testA = candidateNets[0];
+    let testB = candidateNets[1];
+
+    for (let i = 0; i < candidateNets.length; i++) {
+        for (let j = i + 1; j < candidateNets.length; j++) {
+            const n1 = candidateNets[i];
+            const n2 = candidateNets[j];
+            const p1 = netPos[n1];
+            const p2 = netPos[n2];
+            if (!p1 || !p2) continue;
+            const dist = Math.hypot((p1.x / p1.c) - (p2.x / p2.c), (p1.y / p1.c) - (p2.y / p2.c));
+            if (dist > maxDist) {
+                maxDist = dist;
+                testA = n1;
+                testB = n2;
+            }
+        }
+    }
+
+    // Build a sub-circuit with a 1V test battery
+    const testBattery: Item = {
+        uuid: "test_batt", x: 0, y: 0, rotation: 0, connectedA: null, connectedB: null,
+        type: "battery", value: 1
+    };
+    const subItems = [...selectedItems, testBattery];
+
+    // Wires to connect test battery and sub-items using proxy nodes for each net
+    const uniqueNets = Array.from(involvedNets);
+    const subWires: Wire[] = [];
+    const subNodes: WireNode[] = [];
+    
+    uniqueNets.forEach((net, idx) => {
+        subNodes.push({ uuid: `sim_node_${idx}`, x: 0, y: 0 });
+    });
+    
+    // Connect selected items to these proxy nodes
+    for (const item of selectedItems) {
+        const tA = find(termKey({ type: "item", itemUuid: item.uuid, side: "A" }));
+        const tB = find(termKey({ type: "item", itemUuid: item.uuid, side: "B" }));
+        
+        const idxA = uniqueNets.indexOf(tA);
+        const idxB = uniqueNets.indexOf(tB);
+        
+        subWires.push({ uuid: crypto.randomUUID(), from: { type: "item", itemUuid: item.uuid, side: "A" }, to: { type: "node", nodeUuid: subNodes[idxA].uuid }, bendPoints: [] });
+        subWires.push({ uuid: crypto.randomUUID(), from: { type: "item", itemUuid: item.uuid, side: "B" }, to: { type: "node", nodeUuid: subNodes[idxB].uuid }, bendPoints: [] });
+    }
+    
+    // Connect test battery
+    const idxTestA = uniqueNets.indexOf(testA);
+    const idxTestB = uniqueNets.indexOf(testB);
+    subWires.push({ uuid: crypto.randomUUID(), from: { type: "item", itemUuid: "test_batt", side: "A" }, to: { type: "node", nodeUuid: subNodes[idxTestA].uuid }, bendPoints: [] });
+    subWires.push({ uuid: crypto.randomUUID(), from: { type: "item", itemUuid: "test_batt", side: "B" }, to: { type: "node", nodeUuid: subNodes[idxTestB].uuid }, bendPoints: [] });
+
+    const sim = solveCircuit(subItems, subNodes, subWires);
+    if (!sim.success) return undefined;
+
+    const testCurrent = Math.abs(sim.itemCurrents["test_batt"]);
+    if (testCurrent < 1e-10) return undefined;
+
+    return 1 / testCurrent;
+}

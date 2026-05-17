@@ -11,7 +11,7 @@ const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, on
     items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
     drawingWire: DrawingWire | null;
     onTerminalMouseDown: (t: Terminal, p: { x: number; y: number }, e: Konva.KonvaEventObject<MouseEvent>) => void;
-    onBodyClick: (uuid: string) => void;
+    onBodyClick: (uuid: string, e: Konva.KonvaEventObject<MouseEvent>) => void;
     selected: boolean;
     onDragEnd: (uuid: string) => void;
     simCurrent?: number;
@@ -38,7 +38,7 @@ const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, on
                onDragEnd={() => onDragEnd(uuid)}>
             <Rect x={0} y={0} width={100} height={50} fill="transparent"
                   stroke={selected ? "#3b82f6" : "transparent"} strokeWidth={2} cornerRadius={4}
-                  onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid); }} />
+                  onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid, e); }} />
             <Line points={[0, 25, 35, 25]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />
             <Line points={[35, 5, 35, 45]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />
             <Line points={[45, 12, 45, 38]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />

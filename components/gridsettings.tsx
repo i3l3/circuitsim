@@ -14,9 +14,10 @@ interface GridSettingsProps {
     simulating: boolean;
     setSimulating: (v: boolean) => void;
     equivalentResistance?: number;
+    partialResistance?: number;
 }
 
-const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnabled, setSnapEnabled, scale, onShowHelp, simulating, setSimulating, equivalentResistance }: GridSettingsProps) => {
+const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnabled, setSnapEnabled, scale, onShowHelp, simulating, setSimulating, equivalentResistance, partialResistance }: GridSettingsProps) => {
     return (
         <div style={{
             position: "fixed", bottom: 16, left: 16, padding: "12px 16px",
@@ -50,7 +51,12 @@ const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnable
             </div>
             {simulating && equivalentResistance !== undefined && (
                 <div style={{ color: "#059669", fontWeight: "bold" }}>
-                    합성저항: {formatUnit(equivalentResistance, "Ω")}
+                    전체 합성저항: {formatUnit(equivalentResistance, "Ω")}
+                </div>
+            )}
+            {partialResistance !== undefined && (
+                <div style={{ color: "#2563eb", fontWeight: "bold" }}>
+                    선택 영역 합성저항: {formatUnit(partialResistance, "Ω")}
                 </div>
             )}
             <button onClick={() => setSimulating(!simulating)} style={{
