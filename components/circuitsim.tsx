@@ -10,6 +10,8 @@ import PropertyPanel from "@/components/propertypanel";
 import GridBackground from "@/components/grid";
 import GridSettings from "@/components/gridsettings";
 import HelpPanel from "@/components/helppanel";
+import { SimulationResult, solveCircuit } from "@/lib/solver";
+import { formatUnit } from "@/lib/utils";
 
 export interface Item {
     uuid: string; x: number; y: number; rotation: number;
@@ -57,6 +59,10 @@ const CircuitSim = () => {
     const [ctx, setCtx] = useState<CtxMenuState>({ visible: false, x: 0, y: 0, items: [] });
     const [selectedItem, setSelectedItem] = useState<string | null>(null);
     const [showHelp, setShowHelp] = useState(false);
+
+    // Simulation state
+    const [simulating, setSimulating] = useState(false);
+    const [simResults, setSimResults] = useState<SimulationResult | null>(null);
 
     // Grid & zoom state
     const [gridSize, setGridSize] = useState(25);
@@ -124,6 +130,20 @@ const CircuitSim = () => {
         }
         return false;
     }, [findTermAt, findWireAt, scale, snapPt]);
+
+    // Run simulation
+    useEffect(() => {
+        if (!simulating) {
+            setSimResults(null);
+            return;
+        }
+        const res = solveCircuit(items, nodes, wires);
+        setSimResults(res);
+        if (!res.success && res.error) {
+            alert(res.error);
+            setSimulating(false);
+        }
+    }, [simulating, items, nodes, wires]);
 
     useEffect(() => { const h = () => setDims({ w: window.innerWidth, h: window.innerHeight }); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
 
@@ -338,25 +358,38 @@ const CircuitSim = () => {
                         onMouseLeave={e => { (e.target as any).radius(8 / scale); e.target.getLayer()?.batchDraw(); }} />
                 ))}
 
+                {/* Simulation Node Voltages */}
+                {simulating && simResults?.success && nodes.map(n => {
+                    const v = simResults.netVoltages[`node_${n.uuid}`];
+                    if (v === undefined) return null;
+                    return (
+                        <Text key={`sim_n_${n.uuid}`} x={n.x + 12 / scale} y={n.y - 12 / scale} text={formatUnit(v, "V")}
+                              fontSize={12 / scale} fill="#059669" listening={false} />
+                    );
+                })}
+
                 {dw && (() => { const p = drawPts(); return p.length >= 4 ? <Line points={p} stroke="#999" strokeWidth={2 / scale} dash={[8 / scale, 4 / scale]} lineCap="round" lineJoin="round" /> : null; })()}
                 {dw && dw.bendPoints.map((b, i) => <Circle key={`db-${i}`} x={b.x} y={b.y} radius={4 / scale} fill="#666" />)}
 
                 {items.filter(i => i.type === "resistor").map(it => (
                     <Resistor key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 100}
                         items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
-                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd} />
+                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd}
+                        simCurrent={simulating && simResults ? simResults.itemCurrents[it.uuid] : undefined}
+                        simVoltage={simulating && simResults ? simResults.itemVoltages[it.uuid] : undefined} />
                 ))}
                 {items.filter(i => i.type === "battery").map(it => (
                     <Battery key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 5}
                         items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
-                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd} />
+                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd}
+                        simCurrent={simulating && simResults ? simResults.itemCurrents[it.uuid] : undefined} />
                 ))}
 
                 {ctx.visible && <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={closeCtx} />}
             </Layer>
         </Stage>
         {selItem && <PropertyPanel item={selItem} setItems={setItems} onClose={() => setSelectedItem(null)} />}
-        <GridSettings gridSize={gridSize} setGridSize={setGridSize} gridMode={gridMode} setGridMode={setGridMode} snapEnabled={snapEnabled} setSnapEnabled={setSnapEnabled} scale={scale} onShowHelp={() => setShowHelp(true)} />
+        <GridSettings gridSize={gridSize} setGridSize={setGridSize} gridMode={gridMode} setGridMode={setGridMode} snapEnabled={snapEnabled} setSnapEnabled={setSnapEnabled} scale={scale} onShowHelp={() => setShowHelp(true)} simulating={simulating} setSimulating={setSimulating} equivalentResistance={simResults?.equivalentResistance} />
         {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
         </>
     );

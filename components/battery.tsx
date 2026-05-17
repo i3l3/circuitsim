@@ -4,8 +4,9 @@ import {Circle, Group, Line, Rect, Text} from "react-konva";
 import {Dispatch, SetStateAction, useRef, useState} from "react";
 import {DrawingWire, Item, Terminal} from "@/components/circuitsim";
 import Konva from "konva";
+import {formatUnit} from "@/lib/utils";
 
-const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected, onDragEnd }: {
+const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected, onDragEnd, simCurrent }: {
     uuid: string; x: number; y: number; rotation: number; value: number;
     items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
     drawingWire: DrawingWire | null;
@@ -13,6 +14,7 @@ const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, on
     onBodyClick: (uuid: string) => void;
     selected: boolean;
     onDragEnd: (uuid: string) => void;
+    simCurrent?: number;
 }) => {
     const [onA, setOnA] = useState(false);
     const [onB, setOnB] = useState(false);
@@ -43,7 +45,10 @@ const Battery = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, on
             <Line points={[55, 5, 55, 45]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />
             <Line points={[65, 12, 65, 38]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />
             <Line points={[65, 25, 100, 25]} stroke="#333" strokeWidth={2.5} lineCap="round" listening={false} />
-            <Text x={20} y={-14} text={`${value}V`} fontSize={12} fill="#555" listening={false} />
+            <Text x={20} y={-14} text={formatUnit(value, "V")} fontSize={12} fill="#555" listening={false} />
+            {simCurrent !== undefined && (
+                <Text x={20} y={54} text={formatUnit(Math.abs(simCurrent), "A")} fontSize={11} fill="#eab308" listening={false} />
+            )}
             <Text x={30} y={46} text="+" fontSize={11} fill="#c00" listening={false} />
             <Text x={62} y={46} text="−" fontSize={11} fill="#00c" listening={false} />
             <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}

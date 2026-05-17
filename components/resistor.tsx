@@ -4,10 +4,11 @@ import {Circle, Group, Line, Rect, Text} from "react-konva";
 import {Dispatch, SetStateAction, useRef, useState} from "react";
 import {DrawingWire, Item, Terminal} from "@/components/circuitsim";
 import Konva from "konva";
+import {formatUnit} from "@/lib/utils";
 
 const ZZ = [0, 25, 20, 25, 25, 8, 35, 42, 45, 8, 55, 42, 65, 8, 75, 42, 80, 25, 100, 25];
 
-const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected, onDragEnd }: {
+const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected, onDragEnd, simCurrent, simVoltage }: {
     uuid: string; x: number; y: number; rotation: number; value: number;
     items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
     drawingWire: DrawingWire | null;
@@ -15,6 +16,8 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
     onBodyClick: (uuid: string) => void;
     selected: boolean;
     onDragEnd: (uuid: string) => void;
+    simCurrent?: number;
+    simVoltage?: number;
 }) => {
     const [onA, setOnA] = useState(false);
     const [onB, setOnB] = useState(false);
@@ -40,7 +43,10 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
                   stroke={selected ? "#3b82f6" : "transparent"} strokeWidth={2} cornerRadius={4}
                   onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid); }} />
             <Line points={ZZ} stroke="#333" strokeWidth={2.5} lineCap="round" lineJoin="round" listening={false} />
-            <Text x={10} y={-14} text={`${value}Ω`} fontSize={12} fill="#555" listening={false} />
+            <Text x={10} y={-14} text={formatUnit(value, "Ω")} fontSize={12} fill="#555" listening={false} />
+            {simCurrent !== undefined && simVoltage !== undefined && (
+                <Text x={10} y={54} text={`${formatUnit(Math.abs(simCurrent), "A")} / ${formatUnit(Math.abs(simVoltage), "V")}`} fontSize={11} fill="#eab308" listening={false} />
+            )}
             <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}
                 onPointerMove={() => { setRA(10); setOnA(true); }} onPointerOut={() => { setRA(5); setOnA(false); }} onMouseDown={mdA} />
             <Circle x={100} y={25} radius={rB} fill={isD && onB ? "#ff6666" : "red"}

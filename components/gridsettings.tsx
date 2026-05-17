@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUnit } from "@/lib/utils";
+
 interface GridSettingsProps {
     gridSize: number;
     setGridSize: (v: number) => void;
@@ -9,9 +11,12 @@ interface GridSettingsProps {
     setSnapEnabled: (v: boolean) => void;
     scale: number;
     onShowHelp: () => void;
+    simulating: boolean;
+    setSimulating: (v: boolean) => void;
+    equivalentResistance?: number;
 }
 
-const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnabled, setSnapEnabled, scale, onShowHelp }: GridSettingsProps) => {
+const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnabled, setSnapEnabled, scale, onShowHelp, simulating, setSimulating, equivalentResistance }: GridSettingsProps) => {
     return (
         <div style={{
             position: "fixed", bottom: 16, left: 16, padding: "12px 16px",
@@ -43,6 +48,17 @@ const GridSettings = ({ gridSize, setGridSize, gridMode, setGridMode, snapEnable
             <div style={{ color: "#888" }}>
                 확대: {Math.round(scale * 100)}%
             </div>
+            {simulating && equivalentResistance !== undefined && (
+                <div style={{ color: "#059669", fontWeight: "bold" }}>
+                    합성저항: {formatUnit(equivalentResistance, "Ω")}
+                </div>
+            )}
+            <button onClick={() => setSimulating(!simulating)} style={{
+                padding: "4px 10px", background: simulating ? "#ef4444" : "#10b981", color: "#fff", border: "none",
+                borderRadius: 4, cursor: "pointer", fontSize: 13, fontWeight: "bold"
+            }}>
+                {simulating ? "⏹ 시뮬레이션 중지" : "▶ 시뮬레이션 시작"}
+            </button>
             <button onClick={onShowHelp} style={{
                 padding: "4px 10px", background: "#f3f4f6", border: "1px solid #ccc",
                 borderRadius: 4, cursor: "pointer", fontSize: 13, marginLeft: "auto"
