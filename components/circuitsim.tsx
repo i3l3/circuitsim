@@ -56,6 +56,7 @@ const CircuitSim = () => {
         { uuid: crypto.randomUUID(), x: 100, y: 200, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 200 },
     ]);
     const [mpos, setMpos] = useState({ x: 0, y: 0 });
+    const mposRef = useRef({ x: 0, y: 0 });
     const [wires, setWires] = useState<Wire[]>([]);
     const [nodes, setNodes] = useState<WireNode[]>([]);
     const [dw, setDw] = useState<DrawingWire | null>(null);
@@ -64,6 +65,7 @@ const CircuitSim = () => {
     const [showHelp, setShowHelp] = useState(false);
     const [selectionRect, setSelectionRect] = useState<{ startX: number, startY: number, x: number, y: number, w: number, h: number } | null>(null);
     const [partialResistance, setPartialResistance] = useState<number | undefined>(undefined);
+    const clipboardRef = useRef<Item[]>([]);
 
     // Simulation state
     const [simulating, setSimulating] = useState(false);
@@ -183,8 +185,49 @@ const CircuitSim = () => {
         const hd = (e: KeyboardEvent) => {
             if (e.code === "Space") { isSpaceDown.current = true; }
             if (e.key === "Escape") { setDw(null); pendRef.current = null; setCtx(p => ({ ...p, visible: false })); setSelectedItems([]); setSelectionRect(null); }
-            if ((e.key === "r" || e.key === "R") && selectedItems.length === 0) {
-                setItems(p => p.map(it => { const cx = it.x + 50, cy = it.y + 25; return Math.hypot(mpos.x - cx, mpos.y - cy) < 60 ? { ...it, rotation: (it.rotation + 90) % 360 } : it; }));
+            
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+            if (e.key === "Delete" || e.key === "Backspace") {
+                if (selectedItems.length > 0) {
+                    setItems(pr => pr.filter(i => !selectedItems.includes(i.uuid)));
+                    setWires(pr => pr.filter(w => !((w.from.type === "item" && selectedItems.includes(w.from.itemUuid)) || (w.to.type === "item" && selectedItems.includes(w.to.itemUuid)))));
+                    setSelectedItems([]);
+                }
+            }
+
+            if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+                e.preventDefault();
+                setSelectedItems(items.map(i => i.uuid));
+            }
+
+            if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+                clipboardRef.current = items.filter(i => selectedItems.includes(i.uuid));
+            }
+
+            if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+                if (clipboardRef.current.length > 0) {
+                    const minX = Math.min(...clipboardRef.current.map(i => i.x));
+                    const minY = Math.min(...clipboardRef.current.map(i => i.y));
+                    
+                    const newItems = clipboardRef.current.map(i => ({
+                        ...i,
+                        uuid: crypto.randomUUID(),
+                        x: mposRef.current.x + (i.x - minX),
+                        y: mposRef.current.y + (i.y - minY),
+                        connectedA: null, connectedB: null
+                    }));
+                    setItems(pr => [...pr, ...newItems]);
+                    setSelectedItems(newItems.map(i => i.uuid));
+                }
+            }
+
+            if ((e.key === "r" || e.key === "R")) {
+                if (selectedItems.length > 0) {
+                    setItems(p => p.map(it => selectedItems.includes(it.uuid) ? { ...it, rotation: (it.rotation + 90) % 360 } : it));
+                } else {
+                    setItems(p => p.map(it => { const cx = it.x + 50, cy = it.y + 25; return Math.hypot(mposRef.current.x - cx, mposRef.current.y - cy) < 60 ? { ...it, rotation: (it.rotation + 90) % 360 } : it; }));
+                }
             }
         };
         const hu = (e: KeyboardEvent) => {
@@ -193,7 +236,7 @@ const CircuitSim = () => {
         window.addEventListener("keydown", hd);
         window.addEventListener("keyup", hu);
         return () => { window.removeEventListener("keydown", hd); window.removeEventListener("keyup", hu); };
-    }, [mpos, selectedItems]);
+    }, [items, selectedItems]);
 
     /** Zoom with mouse wheel */
     const onWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -234,6 +277,7 @@ const CircuitSim = () => {
 
         const p = getWorldPos(); if (!p) return;
         setMpos(p);
+        mposRef.current = p;
         
         if (selectionRect) {
             setSelectionRect(prev => {
@@ -384,6 +428,38 @@ const CircuitSim = () => {
         mi.push({ label: "🎚️ 스위치 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "switch", value: 0 }]) });
         mi.push({ label: "🅰️ 전류계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "ammeter" }]) });
         mi.push({ label: "🇻 전압계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "voltmeter" }]) });
+        mi.push({ label: "💾 파일로 내보내기", onClick: () => {
+            const data = JSON.stringify({ items, wires, nodes }, null, 2);
+            const blob = new Blob([data], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "circuit.json";
+            a.click();
+            URL.revokeObjectURL(url);
+        } });
+        mi.push({ label: "📂 파일 불러오기", onClick: () => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".json";
+            input.onchange = (ev) => {
+                const file = (ev.target as HTMLInputElement).files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (re) => {
+                    try {
+                        const data = JSON.parse(re.target?.result as string);
+                        setItems(data.items || []);
+                        setWires(data.wires || []);
+                        setNodes(data.nodes || []);
+                    } catch (err) {
+                        alert("파일을 불러오는 중 오류가 발생했습니다.");
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        } });
         
         if (ci) {
             mi.push({ label: "🗑️ 부품 삭제", onClick: () => { setItems(pr => pr.filter(i => i.uuid !== ci.uuid)); setWires(pr => pr.filter(w => !((w.from.type === "item" && w.from.itemUuid === ci.uuid) || (w.to.type === "item" && w.to.itemUuid === ci.uuid)))); setSelectedItems(pr => pr.filter(id => id !== ci.uuid)); } });
@@ -397,7 +473,7 @@ const CircuitSim = () => {
             mi.push({ label: "📌 노드 추가", onClick: () => setWires(pr => pr.map(w => { if (w.uuid !== wh.wire.uuid) return w; const bp = [...w.bendPoints]; bp.splice(wh.si, 0, sp); return { ...w, bendPoints: bp }; })) });
         }
         setCtx({ visible: true, x: p.x, y: p.y, items: mi });
-    }, [dw, findWireAt, items, selectedItems, getWorldPos, scale, snapPt]);
+    }, [dw, findWireAt, items, wires, nodes, selectedItems, getWorldPos, scale, snapPt]);
 
     const onBPCtx = useCallback((wid: string, bi: number, e: Konva.KonvaEventObject<PointerEvent>) => {
         e.evt.preventDefault(); e.cancelBubble = true;
