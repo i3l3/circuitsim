@@ -81,13 +81,13 @@ export function solveCircuit(items: Item[], nodes: WireNode[], wires: Wire[]): S
     netList.forEach((n, i) => netIndex[n] = i);
 
     const numNets = netList.length;
-    const batteries = items.filter(i => i.type === "battery");
-    const numBatts = batteries.length;
+    const voltageSources = items.filter(i => i.type === "battery" || i.type === "ammeter" || (i.type === "switch" && i.value === 1));
+    const numBatts = voltageSources.length;
 
-    // We need a ground node (index 0). If there's a battery, we ground its B terminal.
+    // We need a ground node (index 0). If there's a voltage source, we ground its B terminal.
     let groundNet = netList[0];
-    if (batteries.length > 0) {
-        groundNet = termToNet[termKey({ type: "item", itemUuid: batteries[0].uuid, side: "B" })];
+    if (voltageSources.length > 0) {
+        groundNet = termToNet[termKey({ type: "item", itemUuid: voltageSources[0].uuid, side: "B" })];
     }
     const groundIdx = netIndex[groundNet];
 
@@ -101,14 +101,15 @@ export function solveCircuit(items: Item[], nodes: WireNode[], wires: Wire[]): S
     A[groundIdx][groundIdx] = 1;
     z[groundIdx] = 0;
 
-    // Resistors
+    // Resistors, Voltmeters, Open Switches
     for (const item of items) {
-        if (item.type !== "resistor") continue;
+        if (item.type !== "resistor" && item.type !== "voltmeter" && !(item.type === "switch" && item.value !== 1)) continue;
         const netA = netIndex[termToNet[termKey({ type: "item", itemUuid: item.uuid, side: "A" })]];
         const netB = netIndex[termToNet[termKey({ type: "item", itemUuid: item.uuid, side: "B" })]];
         if (netA === netB) continue; // shorted
 
-        const R = item.value || 100;
+        let R = 1e9; // Open switch or Voltmeter
+        if (item.type === "resistor") R = item.value || 100;
         const g = 1 / R;
 
         if (netA !== groundIdx) A[netA][netA] += g;
@@ -119,12 +120,12 @@ export function solveCircuit(items: Item[], nodes: WireNode[], wires: Wire[]): S
         }
     }
 
-    // Batteries
-    batteries.forEach((batt, bIdx) => {
+    // Batteries, Ammeters, Closed Switches
+    voltageSources.forEach((vs, bIdx) => {
         const mIdx = numNets + bIdx;
-        const netA = netIndex[termToNet[termKey({ type: "item", itemUuid: batt.uuid, side: "A" })]]; // Positive
-        const netB = netIndex[termToNet[termKey({ type: "item", itemUuid: batt.uuid, side: "B" })]]; // Negative
-        const V = batt.value || 5;
+        const netA = netIndex[termToNet[termKey({ type: "item", itemUuid: vs.uuid, side: "A" })]]; // Positive
+        const netB = netIndex[termToNet[termKey({ type: "item", itemUuid: vs.uuid, side: "B" })]]; // Negative
+        const V = vs.type === "battery" ? (vs.value || 5) : 0;
 
         // V_A - V_B = V
         A[mIdx][netA] = 1;
@@ -161,16 +162,17 @@ export function solveCircuit(items: Item[], nodes: WireNode[], wires: Wire[]): S
         const vB = resultVoltages[termB] || 0;
         itemVoltages[item.uuid] = vA - vB;
 
-        if (item.type === "resistor") {
-            const R = item.value || 100;
+        if (item.type === "resistor" || item.type === "voltmeter" || (item.type === "switch" && item.value !== 1)) {
+            let R = 1e9;
+            if (item.type === "resistor") R = item.value || 100;
             const I = (vA - vB) / R;
             itemCurrents[item.uuid] = I;
-            totalPower += I * I * R;
-        } else if (item.type === "battery") {
-            const bIdx = batteries.findIndex(b => b.uuid === item.uuid);
+            if (item.type === "resistor") totalPower += I * I * R;
+        } else if (item.type === "battery" || item.type === "ammeter" || (item.type === "switch" && item.value === 1)) {
+            const bIdx = voltageSources.findIndex(b => b.uuid === item.uuid);
             const I = -x[numNets + bIdx];
-            itemCurrents[item.uuid] = I; // Current flowing A -> B (positive to negative)
-            if (I > 0) totalBatteryCurrent += I; // Current leaving positive terminal
+            itemCurrents[item.uuid] = I; // Current flowing A -> B
+            if (item.type === "battery" && I > 0) totalBatteryCurrent += I;
         }
     }
 

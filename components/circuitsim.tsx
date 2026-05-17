@@ -5,6 +5,9 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import Konva from "konva";
 import Resistor from "@/components/resistor";
 import Battery from "@/components/battery";
+import Switch from "@/components/switch";
+import Ammeter from "@/components/ammeter";
+import Voltmeter from "@/components/voltmeter";
 import ContextMenu, {ContextMenuItem} from "@/components/contextmenu";
 import PropertyPanel from "@/components/propertypanel";
 import GridBackground from "@/components/grid";
@@ -16,7 +19,7 @@ import { formatUnit } from "@/lib/utils";
 export interface Item {
     uuid: string; x: number; y: number; rotation: number;
     connectedA: string | null; connectedB: string | null;
-    type: "resistor" | "battery"; value?: number;
+    type: "resistor" | "battery" | "switch" | "ammeter" | "voltmeter"; value?: number;
 }
 export interface Point { uuid: string; x: number; y: number; }
 export interface ClickEvent { clicked: boolean; x: number; y: number; }
@@ -378,7 +381,17 @@ const CircuitSim = () => {
         const mi: ContextMenuItem[] = [];
         mi.push({ label: "➕ 저항 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 }]) });
         mi.push({ label: "🔋 전지 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "battery", value: 5 }]) });
-        if (ci) mi.push({ label: "🗑️ 부품 삭제", onClick: () => { setItems(pr => pr.filter(i => i.uuid !== ci.uuid)); setWires(pr => pr.filter(w => !((w.from.type === "item" && w.from.itemUuid === ci.uuid) || (w.to.type === "item" && w.to.itemUuid === ci.uuid)))); setSelectedItems(pr => pr.filter(id => id !== ci.uuid)); } });
+        mi.push({ label: "🎚️ 스위치 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "switch", value: 0 }]) });
+        mi.push({ label: "🅰️ 전류계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "ammeter" }]) });
+        mi.push({ label: "🇻 전압계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "voltmeter" }]) });
+        
+        if (ci) {
+            mi.push({ label: "🗑️ 부품 삭제", onClick: () => { setItems(pr => pr.filter(i => i.uuid !== ci.uuid)); setWires(pr => pr.filter(w => !((w.from.type === "item" && w.from.itemUuid === ci.uuid) || (w.to.type === "item" && w.to.itemUuid === ci.uuid)))); setSelectedItems(pr => pr.filter(id => id !== ci.uuid)); } });
+            if (ci.type === "switch") {
+                mi.push({ label: "🔄 스위치 켜기/끄기", onClick: () => setItems(pr => pr.map(i => i.uuid === ci.uuid ? { ...i, value: i.value === 1 ? 0 : 1 } : i)) });
+            }
+        }
+        
         if (wh) {
             mi.push({ label: "✂️ 선 삭제", onClick: () => setWires(pr => pr.filter(w => w.uuid !== wh.wire.uuid)) });
             mi.push({ label: "📌 노드 추가", onClick: () => setWires(pr => pr.map(w => { if (w.uuid !== wh.wire.uuid) return w; const bp = [...w.bendPoints]; bp.splice(wh.si, 0, sp); return { ...w, bendPoints: bp }; })) });
@@ -515,6 +528,23 @@ const CircuitSim = () => {
                         items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
                         selected={selectedItems.includes(it.uuid)} onDragEnd={onItemDragEnd}
                         simCurrent={simulating && simResults ? simResults.itemCurrents[it.uuid] : undefined} />
+                ))}
+                {items.filter(i => i.type === "switch").map(it => (
+                    <Switch key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 0}
+                        items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
+                        selected={selectedItems.includes(it.uuid)} onDragEnd={onItemDragEnd} />
+                ))}
+                {items.filter(i => i.type === "ammeter").map(it => (
+                    <Ammeter key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation}
+                        items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
+                        selected={selectedItems.includes(it.uuid)} onDragEnd={onItemDragEnd}
+                        simCurrent={simulating && simResults ? simResults.itemCurrents[it.uuid] : undefined} />
+                ))}
+                {items.filter(i => i.type === "voltmeter").map(it => (
+                    <Voltmeter key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation}
+                        items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
+                        selected={selectedItems.includes(it.uuid)} onDragEnd={onItemDragEnd}
+                        simVoltage={simulating && simResults ? simResults.itemVoltages[it.uuid] : undefined} />
                 ))}
                 
                 {/* Selection Marquee */}
