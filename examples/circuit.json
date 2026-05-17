@@ -1,0 +1,149 @@
+{
+  "items": [
+    {
+      "uuid": "09e76c6b-8809-4ce8-a15b-74dad1b669b0",
+      "x": 100,
+      "y": 100,
+      "rotation": 0,
+      "connectedA": null,
+      "connectedB": null,
+      "type": "resistor",
+      "value": 100
+    },
+    {
+      "uuid": "439169ca-f50d-44e2-9a65-edea7179636e",
+      "x": 100,
+      "y": 200,
+      "rotation": 0,
+      "connectedA": null,
+      "connectedB": null,
+      "type": "resistor",
+      "value": 200
+    },
+    {
+      "uuid": "b226f5d6-8e6e-478b-92c1-7c422653b795",
+      "x": 0,
+      "y": 325,
+      "rotation": 0,
+      "connectedA": null,
+      "connectedB": null,
+      "type": "battery",
+      "value": 5
+    },
+    {
+      "uuid": "389c438b-152a-47df-b107-846249e0eb25",
+      "x": 0,
+      "y": 200,
+      "rotation": 0,
+      "connectedA": null,
+      "connectedB": null,
+      "type": "switch",
+      "value": 0
+    }
+  ],
+  "wires": [
+    {
+      "uuid": "b01944b7-40a5-49bf-89f1-1406b2c1d4d4",
+      "from": {
+        "type": "item",
+        "itemUuid": "389c438b-152a-47df-b107-846249e0eb25",
+        "side": "B"
+      },
+      "to": {
+        "type": "item",
+        "itemUuid": "439169ca-f50d-44e2-9a65-edea7179636e",
+        "side": "A"
+      },
+      "bendPoints": []
+    },
+    {
+      "uuid": "7d8faeb4-5abe-4b1e-8c82-15a6a2685ab9",
+      "from": {
+        "type": "node",
+        "nodeUuid": "f0f2b6bd-5a73-4f19-bc28-4e3a6af5959b"
+      },
+      "to": {
+        "type": "item",
+        "itemUuid": "09e76c6b-8809-4ce8-a15b-74dad1b669b0",
+        "side": "A"
+      },
+      "bendPoints": [
+        {
+          "x": 0,
+          "y": 125
+        },
+        {
+          "x": 0,
+          "y": 125
+        }
+      ]
+    },
+    {
+      "uuid": "6380ea80-ebfb-49cc-9715-2569a10f1849",
+      "from": {
+        "type": "item",
+        "itemUuid": "389c438b-152a-47df-b107-846249e0eb25",
+        "side": "A"
+      },
+      "to": {
+        "type": "node",
+        "nodeUuid": "f0f2b6bd-5a73-4f19-bc28-4e3a6af5959b"
+      },
+      "bendPoints": []
+    },
+    {
+      "uuid": "b2f3c2cc-5b06-4461-aeaf-2aa67e33c7af",
+      "from": {
+        "type": "item",
+        "itemUuid": "b226f5d6-8e6e-478b-92c1-7c422653b795",
+        "side": "A"
+      },
+      "to": {
+        "type": "item",
+        "itemUuid": "389c438b-152a-47df-b107-846249e0eb25",
+        "side": "A"
+      },
+      "bendPoints": []
+    },
+    {
+      "uuid": "e9a50f98-45a6-4e42-a482-c0d067387abd",
+      "from": {
+        "type": "item",
+        "itemUuid": "09e76c6b-8809-4ce8-a15b-74dad1b669b0",
+        "side": "B"
+      },
+      "to": {
+        "type": "item",
+        "itemUuid": "439169ca-f50d-44e2-9a65-edea7179636e",
+        "side": "B"
+      },
+      "bendPoints": []
+    },
+    {
+      "uuid": "68ab5202-c5f4-490d-b03e-aa4c85fa062f",
+      "from": {
+        "type": "item",
+        "itemUuid": "439169ca-f50d-44e2-9a65-edea7179636e",
+        "side": "B"
+      },
+      "to": {
+        "type": "item",
+        "itemUuid": "b226f5d6-8e6e-478b-92c1-7c422653b795",
+        "side": "B"
+      },
+      "bendPoints": [
+        {
+          "x": 200,
+          "y": 350
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "uuid": "f0f2b6bd-5a73-4f19-bc28-4e3a6af5959b",
+      "x": 0,
+      "y": 225
+    }
+  ]
+}

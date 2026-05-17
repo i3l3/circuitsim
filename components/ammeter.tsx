@@ -47,7 +47,9 @@ const Ammeter = ({ uuid, x, y, rotation, items, setItems, drawingWire, onTermina
             <Text x={43} y={15} text="A" fontSize={22} fontStyle="bold" fill="#333" listening={false} />
             
             {simCurrent !== undefined && (
-                <Text x={10} y={48} text={formatUnit(Math.abs(simCurrent), "A")} fontSize={12} fill="#eab308" listening={false} />
+                <Text x={10} y={48} 
+                      text={Math.abs(simCurrent) < 1e-7 ? "전원 공급 안됨" : formatUnit(Math.abs(simCurrent), "A")} 
+                      fontSize={11} fill={Math.abs(simCurrent) < 1e-7 ? "#ef4444" : "#eab308"} listening={false} />
             )}
             
             <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}

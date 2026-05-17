@@ -45,7 +45,9 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
             <Line points={ZZ} stroke="#333" strokeWidth={2.5} lineCap="round" lineJoin="round" listening={false} />
             <Text x={10} y={-14} text={formatUnit(value, "Ω")} fontSize={12} fill="#555" listening={false} />
             {simCurrent !== undefined && simVoltage !== undefined && (
-                <Text x={10} y={54} text={`${formatUnit(Math.abs(simCurrent), "A")} / ${formatUnit(Math.abs(simVoltage), "V")}`} fontSize={11} fill="#eab308" listening={false} />
+                <Text x={10} y={54} 
+                      text={Math.abs(simCurrent) < 1e-7 ? "전원 공급 안됨" : `${formatUnit(Math.abs(simCurrent), "A")} / ${formatUnit(Math.abs(simVoltage), "V")}`} 
+                      fontSize={11} fill={Math.abs(simCurrent) < 1e-7 ? "#ef4444" : "#eab308"} listening={false} />
             )}
             <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}
                 onPointerMove={() => { setRA(10); setOnA(true); }} onPointerOut={() => { setRA(5); setOnA(false); }} onMouseDown={mdA} />

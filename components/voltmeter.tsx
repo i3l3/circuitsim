@@ -47,7 +47,9 @@ const Voltmeter = ({ uuid, x, y, rotation, items, setItems, drawingWire, onTermi
             <Text x={43} y={15} text="V" fontSize={22} fontStyle="bold" fill="#333" listening={false} />
             
             {simVoltage !== undefined && (
-                <Text x={10} y={48} text={formatUnit(Math.abs(simVoltage), "V")} fontSize={12} fill="#eab308" listening={false} />
+                <Text x={10} y={48} 
+                      text={Math.abs(simVoltage) < 1e-7 ? "전원 공급 안됨" : formatUnit(Math.abs(simVoltage), "V")} 
+                      fontSize={11} fill={Math.abs(simVoltage) < 1e-7 ? "#ef4444" : "#eab308"} listening={false} />
             )}
             
             <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}

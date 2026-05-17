@@ -1,5 +1,5 @@
 export function formatUnit(value: number, unit: string): string {
-    if (value === 0 || Math.abs(value) < 1e-12) return `0${unit}`;
+    if (value === 0 || Math.abs(value) < 1e-7) return `0${unit}`;
 
     const absVal = Math.abs(value);
     let prefix = "";
