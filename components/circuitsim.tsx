@@ -480,7 +480,7 @@ const CircuitSim = () => {
         mi.push({ label: "🔋 전지 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "battery", value: 5 }]) });
         mi.push({ label: "🎚️ 스위치 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "switch", value: 0 }]) });
         mi.push({ label: "🅰️ 전류계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "ammeter" }]) });
-        mi.push({ label: "🇻 전압계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "voltmeter" }]) });
+        mi.push({ label: "➿ 전압계 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "voltmeter" }]) });
         mi.push({ label: "💾 파일로 내보내기", onClick: () => {
             const data = JSON.stringify({ items, wires, nodes }, null, 2);
             const blob = new Blob([data], { type: "application/json" });
