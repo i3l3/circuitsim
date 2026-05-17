@@ -15,6 +15,7 @@ import GridSettings from "@/components/gridsettings";
 import HelpPanel from "@/components/helppanel";
 import { SimulationResult, solveCircuit, calculatePartialResistance } from "@/lib/solver";
 import { formatUnit } from "@/lib/utils";
+import defaultCircuit from "@/examples/circuit.json";
 
 export interface Item {
     uuid: string; x: number; y: number; rotation: number;
@@ -49,16 +50,68 @@ function getItemTermPos(item: Item, side: "A" | "B"): { x: number; y: number } {
     return { x: cx + lx * Math.cos(rad), y: cy + lx * Math.sin(rad) };
 }
 
+function getCenteredInitialCircuit(viewportW: number, viewportH: number) {
+    const items: Item[] = defaultCircuit.items.map(item => ({ ...item }));
+    const wires: Wire[] = defaultCircuit.wires.map(wire => ({
+        ...wire,
+        from: { ...wire.from },
+        to: { ...wire.to },
+        bendPoints: wire.bendPoints.map(bp => ({ ...bp })),
+    }));
+    const nodes: WireNode[] = defaultCircuit.nodes.map(node => ({ ...node }));
+
+    const xs: number[] = [];
+    const ys: number[] = [];
+
+    for (const item of items) {
+        xs.push(item.x, item.x + 100);
+        ys.push(item.y, item.y + 50);
+    }
+    for (const node of nodes) {
+        xs.push(node.x);
+        ys.push(node.y);
+    }
+    for (const wire of wires) {
+        for (const bp of wire.bendPoints) {
+            xs.push(bp.x);
+            ys.push(bp.y);
+        }
+    }
+
+    if (xs.length === 0 || ys.length === 0 || viewportW <= 0 || viewportH <= 0) {
+        return { items, wires, nodes };
+    }
+
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const dx = viewportW / 2 - (minX + maxX) / 2;
+    const dy = viewportH / 2 - (minY + maxY) / 2;
+
+    return {
+        items: items.map(item => ({ ...item, x: item.x + dx, y: item.y + dy })),
+        wires: wires.map(wire => ({ ...wire, bendPoints: wire.bendPoints.map(bp => ({ x: bp.x + dx, y: bp.y + dy })) })),
+        nodes: nodes.map(node => ({ ...node, x: node.x + dx, y: node.y + dy })),
+    };
+}
+
 const CircuitSim = () => {
+    const initialCircuit = useRef(getCenteredInitialCircuit(
+        typeof window !== "undefined" ? window.innerWidth : 0,
+        typeof window !== "undefined" ? window.innerHeight : 0,
+    )).current;
     const [dims, setDims] = useState(() => typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : { w: 0, h: 0 });
-    const [items, setItems] = useState<Item[]>([
-        { uuid: crypto.randomUUID(), x: 100, y: 100, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 },
-        { uuid: crypto.randomUUID(), x: 100, y: 200, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 200 },
-    ]);
+    const [items, setItems] = useState<Item[]>(() => initialCircuit.items.map(item => ({ ...item })));
     const [mpos, setMpos] = useState({ x: 0, y: 0 });
     const mposRef = useRef({ x: 0, y: 0 });
-    const [wires, setWires] = useState<Wire[]>([]);
-    const [nodes, setNodes] = useState<WireNode[]>([]);
+    const [wires, setWires] = useState<Wire[]>(() => initialCircuit.wires.map(wire => ({
+        ...wire,
+        from: { ...wire.from },
+        to: { ...wire.to },
+        bendPoints: wire.bendPoints.map(bp => ({ ...bp })),
+    })));
+    const [nodes, setNodes] = useState<WireNode[]>(() => initialCircuit.nodes.map(node => ({ ...node })));
     const [dw, setDw] = useState<DrawingWire | null>(null);
     const [ctx, setCtx] = useState<CtxMenuState>({ visible: false, x: 0, y: 0, items: [] });
     const [selectedItems, setSelectedItems] = useState<string[]>([]);
