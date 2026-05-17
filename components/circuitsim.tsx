@@ -7,20 +7,20 @@ import Resistor from "@/components/resistor";
 import Battery from "@/components/battery";
 import ContextMenu, {ContextMenuItem} from "@/components/contextmenu";
 import PropertyPanel from "@/components/propertypanel";
+import GridBackground from "@/components/grid";
+import GridSettings from "@/components/gridsettings";
+import HelpPanel from "@/components/helppanel";
 
 export interface Item {
     uuid: string; x: number; y: number; rotation: number;
     connectedA: string | null; connectedB: string | null;
     type: "resistor" | "battery"; value?: number;
 }
-
 export interface Point { uuid: string; x: number; y: number; }
 export interface ClickEvent { clicked: boolean; x: number; y: number; }
-
 export type Terminal =
     | { type: "item"; itemUuid: string; side: "A" | "B" }
     | { type: "node"; nodeUuid: string };
-
 export interface WireNode { uuid: string; x: number; y: number; }
 export interface Wire { uuid: string; from: Terminal; to: Terminal; bendPoints: { x: number; y: number }[]; }
 export interface DrawingWire { from: Terminal; fromPos: { x: number; y: number }; bendPoints: { x: number; y: number }[]; mode: "click" | "drag"; }
@@ -47,8 +47,8 @@ function getItemTermPos(item: Item, side: "A" | "B"): { x: number; y: number } {
 const CircuitSim = () => {
     const [dims, setDims] = useState(() => typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : { w: 0, h: 0 });
     const [items, setItems] = useState<Item[]>([
-        { uuid: crypto.randomUUID(), x: 50, y: 100, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 },
-        { uuid: crypto.randomUUID(), x: 70, y: 200, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 200 },
+        { uuid: crypto.randomUUID(), x: 100, y: 100, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 },
+        { uuid: crypto.randomUUID(), x: 100, y: 200, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 200 },
     ]);
     const [mpos, setMpos] = useState({ x: 0, y: 0 });
     const [wires, setWires] = useState<Wire[]>([]);
@@ -56,12 +56,31 @@ const CircuitSim = () => {
     const [dw, setDw] = useState<DrawingWire | null>(null);
     const [ctx, setCtx] = useState<CtxMenuState>({ visible: false, x: 0, y: 0, items: [] });
     const [selectedItem, setSelectedItem] = useState<string | null>(null);
+    const [showHelp, setShowHelp] = useState(false);
+
+    // Grid & zoom state
+    const [gridSize, setGridSize] = useState(25);
+    const [gridMode, setGridMode] = useState<"dots" | "lines">("dots");
+    const [snapEnabled, setSnapEnabled] = useState(true);
+    const [scale, setScale] = useState(1);
+    const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
 
     const stageRef = useRef<Konva.Stage>(null);
     const bgRef = useRef<Konva.Rect>(null);
     const pendRef = useRef<{ terminal: Terminal; pos: { x: number; y: number }; ms: { x: number; y: number } } | null>(null);
-    // Track if shift-bend was just added in drag mode to skip mouseUp completion
     const shiftBendRef = useRef(false);
+
+    /** Snap a value to grid */
+    const snap = useCallback((v: number) => snapEnabled ? Math.round(v / gridSize) * gridSize : v, [snapEnabled, gridSize]);
+    const snapPt = useCallback((p: { x: number; y: number }) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
+
+    /** Get pointer position in world coords (accounting for zoom/pan) */
+    const getWorldPos = useCallback((): { x: number; y: number } | null => {
+        if (!stageRef.current) return null;
+        const pp = stageRef.current.getPointerPosition();
+        if (!pp) return null;
+        return { x: (pp.x - stagePos.x) / scale, y: (pp.y - stagePos.y) / scale };
+    }, [scale, stagePos]);
 
     const resolvePos = useCallback((t: Terminal) => {
         if (t.type === "item") { const it = items.find(i => i.uuid === t.itemUuid); return it ? getItemTermPos(it, t.side) : null; }
@@ -85,14 +104,15 @@ const CircuitSim = () => {
     }, [wires, resolvePos]);
 
     const completeWireAt = useCallback((px: number, py: number, drawing: DrawingWire): boolean => {
-        const th = findTermAt(px, py, 15);
+        const th = findTermAt(px, py, 15 / scale);
         if (th && !termsEq(drawing.from, th.terminal)) {
             setWires(p => [...p, { uuid: crypto.randomUUID(), from: drawing.from, to: th.terminal, bendPoints: [...drawing.bendPoints] }]);
             setDw(null); return true;
         }
-        const wh = findWireAt(px, py, 12);
+        const wh = findWireAt(px, py, 12 / scale);
         if (wh) {
-            const nn: WireNode = { uuid: crypto.randomUUID(), x: px, y: py };
+            const sp = snapPt({ x: px, y: py });
+            const nn: WireNode = { uuid: crypto.randomUUID(), ...sp };
             const nt: Terminal = { type: "node", nodeUuid: nn.uuid };
             const ow = wh.wire, bb = ow.bendPoints.slice(0, wh.si), ba = ow.bendPoints.slice(wh.si);
             setNodes(p => [...p, nn]);
@@ -103,10 +123,9 @@ const CircuitSim = () => {
             setDw(null); return true;
         }
         return false;
-    }, [findTermAt, findWireAt]);
+    }, [findTermAt, findWireAt, scale, snapPt]);
 
     useEffect(() => { const h = () => setDims({ w: window.innerWidth, h: window.innerHeight }); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
-    useEffect(() => { if (stageRef.current) stageRef.current.container().style.backgroundColor = "green"; }, []);
 
     useEffect(() => {
         const h = (e: KeyboardEvent) => {
@@ -118,37 +137,54 @@ const CircuitSim = () => {
         window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
     }, [mpos, selectedItem]);
 
+    /** Zoom with mouse wheel */
+    const onWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
+        e.evt.preventDefault();
+        const stage = stageRef.current; if (!stage) return;
+        const oldScale = scale;
+        const pointer = stage.getPointerPosition(); if (!pointer) return;
+
+        const dir = e.evt.deltaY > 0 ? -1 : 1;
+        const factor = 1.08;
+        const newScale = Math.min(3, Math.max(0.2, dir > 0 ? oldScale * factor : oldScale / factor));
+
+        const mousePointTo = { x: (pointer.x - stagePos.x) / oldScale, y: (pointer.y - stagePos.y) / oldScale };
+        const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale };
+
+        setScale(newScale);
+        setStagePos(newPos);
+    }, [scale, stagePos]);
+
     const closeCtx = useCallback(() => setCtx(p => ({ ...p, visible: false })), []);
 
     const onPointerMove = useCallback(() => {
-        if (!stageRef.current) return;
-        const p = stageRef.current.getPointerPosition(); if (!p) return;
-        setMpos({ x: p.x, y: p.y });
+        const p = getWorldPos(); if (!p) return;
+        setMpos(p);
         if (pendRef.current && !dw) {
-            if (Math.hypot(p.x - pendRef.current.ms.x, p.y - pendRef.current.ms.y) > 5) {
+            if (Math.hypot(p.x - pendRef.current.ms.x, p.y - pendRef.current.ms.y) > 5 / scale) {
                 setDw({ from: pendRef.current.terminal, fromPos: pendRef.current.pos, bendPoints: [], mode: "drag" });
                 pendRef.current = null;
             }
         }
-    }, [dw]);
+    }, [dw, getWorldPos, scale]);
 
-    /** Terminal mouseDown */
     const onTermMD = useCallback((terminal: Terminal, pos: { x: number; y: number }, _e: Konva.KonvaEventObject<MouseEvent>) => {
         if (ctx.visible) { closeCtx(); return; }
         if (dw) {
             if (!termsEq(dw.from, terminal)) setWires(p => [...p, { uuid: crypto.randomUUID(), from: dw.from, to: terminal, bendPoints: [...dw.bendPoints] }]);
             setDw(null); pendRef.current = null; return;
         }
-        if (!stageRef.current) return;
-        const mp = stageRef.current.getPointerPosition();
+        const mp = getWorldPos();
         pendRef.current = { terminal, pos, ms: mp || pos };
-    }, [dw, ctx.visible, closeCtx]);
+    }, [dw, ctx.visible, closeCtx, getWorldPos]);
 
-    /** Component body click → select for properties */
-    const onItemClick = useCallback((uuid: string) => {
-        if (dw) return; // don't select while drawing
-        setSelectedItem(prev => prev === uuid ? null : uuid);
-    }, [dw]);
+    const onItemClick = useCallback((uuid: string) => { if (dw) return; setSelectedItem(prev => prev === uuid ? null : uuid); }, [dw]);
+
+    /** Snap items on drag end */
+    const onItemDragEnd = useCallback((uuid: string) => {
+        if (!snapEnabled) return;
+        setItems(p => p.map(it => it.uuid === uuid ? { ...it, x: snap(it.x), y: snap(it.y) } : it));
+    }, [snapEnabled, snap]);
 
     const onStageMouseUp = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
         if (shiftBendRef.current) { shiftBendRef.current = false; return; }
@@ -157,56 +193,45 @@ const CircuitSim = () => {
             pendRef.current = null; return;
         }
         if (dw && dw.mode === "drag") {
-            if (!stageRef.current) { setDw(null); return; }
-            const p = stageRef.current.getPointerPosition();
+            const p = getWorldPos();
             if (!p || !completeWireAt(p.x, p.y, dw)) setDw(null);
         }
-    }, [dw, completeWireAt]);
+    }, [dw, completeWireAt, getWorldPos]);
 
-    /** Click mode: left-click adds bend point or completes on wire */
     const onStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
         if (ctx.visible) { closeCtx(); return; }
         if (!dw || dw.mode !== "click") return;
-        if (!stageRef.current) return;
-        const p = stageRef.current.getPointerPosition(); if (!p) return;
-
-        // Skip if near a terminal (will be handled by onTermMD)
-        if (findTermAt(p.x, p.y, 15)) return;
-        // Try auto-junction on wire
+        const p = getWorldPos(); if (!p) return;
+        if (findTermAt(p.x, p.y, 15 / scale)) return;
         if (completeWireAt(p.x, p.y, dw)) return;
-        // Add bend point on any click
-        setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, { x: p.x, y: p.y }] } : prev);
-    }, [dw, ctx.visible, closeCtx, completeWireAt, findTermAt]);
+        const sp = snapPt(p);
+        setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, sp] } : prev);
+    }, [dw, ctx.visible, closeCtx, completeWireAt, findTermAt, getWorldPos, scale, snapPt]);
 
-    /** Drag mode: shift+click adds bend point */
     const onStageMD = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
         if (dw && dw.mode === "drag" && e.evt.shiftKey) {
-            if (!stageRef.current) return;
-            const p = stageRef.current.getPointerPosition();
-            if (p) {
-                shiftBendRef.current = true;
-                setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, { x: p.x, y: p.y }] } : prev);
-            }
+            const p = getWorldPos();
+            if (p) { shiftBendRef.current = true; const sp = snapPt(p); setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, sp] } : prev); }
         }
-    }, [dw]);
+    }, [dw, getWorldPos, snapPt]);
 
     const onStageCtxMenu = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
         e.evt.preventDefault();
         if (dw) { setDw(null); return; }
-        if (!stageRef.current) return;
-        const p = stageRef.current.getPointerPosition(); if (!p) return;
-        const wh = findWireAt(p.x, p.y, 10);
+        const p = getWorldPos(); if (!p) return;
+        const sp = snapPt(p);
+        const wh = findWireAt(p.x, p.y, 10 / scale);
         const ci = items.find(it => Math.hypot(p.x - (it.x + 50), p.y - (it.y + 25)) < 55);
         const mi: ContextMenuItem[] = [];
-        mi.push({ label: "➕ 저항 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: p.x - 50, y: p.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 }]) });
-        mi.push({ label: "🔋 전지 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: p.x - 50, y: p.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "battery", value: 5 }]) });
+        mi.push({ label: "➕ 저항 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 }]) });
+        mi.push({ label: "🔋 전지 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: sp.x - 50, y: sp.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "battery", value: 5 }]) });
         if (ci) mi.push({ label: "🗑️ 부품 삭제", onClick: () => { setItems(pr => pr.filter(i => i.uuid !== ci.uuid)); setWires(pr => pr.filter(w => !((w.from.type === "item" && w.from.itemUuid === ci.uuid) || (w.to.type === "item" && w.to.itemUuid === ci.uuid)))); if (selectedItem === ci.uuid) setSelectedItem(null); } });
         if (wh) {
             mi.push({ label: "✂️ 선 삭제", onClick: () => setWires(pr => pr.filter(w => w.uuid !== wh.wire.uuid)) });
-            mi.push({ label: "📌 노드 추가", onClick: () => setWires(pr => pr.map(w => { if (w.uuid !== wh.wire.uuid) return w; const bp = [...w.bendPoints]; bp.splice(wh.si, 0, { x: p.x, y: p.y }); return { ...w, bendPoints: bp }; })) });
+            mi.push({ label: "📌 노드 추가", onClick: () => setWires(pr => pr.map(w => { if (w.uuid !== wh.wire.uuid) return w; const bp = [...w.bendPoints]; bp.splice(wh.si, 0, sp); return { ...w, bendPoints: bp }; })) });
         }
         setCtx({ visible: true, x: p.x, y: p.y, items: mi });
-    }, [dw, findWireAt, items, selectedItem]);
+    }, [dw, findWireAt, items, selectedItem, getWorldPos, scale, snapPt]);
 
     const onBPCtx = useCallback((wid: string, bi: number, e: Konva.KonvaEventObject<PointerEvent>) => {
         e.evt.preventDefault(); e.cancelBubble = true;
@@ -247,6 +272,19 @@ const CircuitSim = () => {
         setDw(null);
     }, [dw, ctx.visible, closeCtx]);
 
+    /** Snap bend point on drag end */
+    const onBPDragEnd = useCallback((wid: string, bi: number) => {
+        if (!snapEnabled) return;
+        setWires(p => p.map(w => { if (w.uuid !== wid) return w; const nb = [...w.bendPoints]; nb[bi] = snapPt(nb[bi]); return { ...w, bendPoints: nb }; }));
+    }, [snapEnabled, snapPt]);
+
+    /** Snap node on drag end */
+    const onNodeDragEnd = useCallback((nid: string) => {
+        if (!snapEnabled) return;
+        setNodes(p => p.map(n => n.uuid === nid ? snapPt(n) as WireNode : n));
+        setNodes(p => p.map(n => n.uuid === nid ? { ...n, ...snapPt(n) } : n));
+    }, [snapEnabled, snapPt]);
+
     const wirePts = useCallback((w: Wire) => {
         const fp = resolvePos(w.from), tp = resolvePos(w.to); if (!fp || !tp) return [];
         const pts = [fp.x, fp.y]; for (const b of w.bendPoints) pts.push(b.x, b.y); pts.push(tp.x, tp.y); return pts;
@@ -258,53 +296,68 @@ const CircuitSim = () => {
     }, [dw, resolvePos, mpos]);
 
     const selItem = selectedItem ? items.find(i => i.uuid === selectedItem) : null;
-
     if (dims.w === 0) return null;
 
     return (
         <>
-        <Stage width={window.innerWidth} height={window.innerHeight} ref={stageRef}
-            onDragMove={() => { if (bgRef.current) bgRef.current.absolutePosition({ x: 0, y: 0 }); }}
+        <Stage width={dims.w} height={dims.h} ref={stageRef}
+            scaleX={scale} scaleY={scale} x={stagePos.x} y={stagePos.y}
+            draggable={!dw && !pendRef.current}
+            onDragEnd={(e) => { if (e.target === stageRef.current) setStagePos({ x: e.target.x(), y: e.target.y() }); }}
+            onWheel={onWheel}
             onPointerMove={onPointerMove} onClick={onStageClick}
             onMouseDown={onStageMD} onMouseUp={onStageMouseUp} onContextMenu={onStageCtxMenu}>
-            <Layer>
-                <Rect ref={bgRef} width={dims.w} height={dims.h} fill="white" />
-                <Text text="우클릭: 메뉴 | 빨간 점: 선 연결 | 클릭: 꺾기 | R: 회전 | ESC: 취소" fontSize={13} fill="#888" x={5} y={5} />
 
-                {wires.map(w => { const p = wirePts(w); return p.length >= 4 ? <Line key={w.uuid} points={p} stroke="#333" strokeWidth={3} lineCap="round" lineJoin="round" hitStrokeWidth={16} /> : null; })}
+            {/* Grid layer (behind everything) */}
+            <Layer listening={false}>
+                <Rect x={-stagePos.x / scale} y={-stagePos.y / scale} width={dims.w / scale} height={dims.h / scale} fill="#fafafa" />
+                <GridBackground width={dims.w} height={dims.h} gridSize={gridSize} scale={scale} stageX={stagePos.x} stageY={stagePos.y} mode={gridMode} />
+            </Layer>
+
+            {/* Main content layer */}
+            <Layer>
+                {wires.map(w => { const p = wirePts(w); return p.length >= 4 ? <Line key={w.uuid} points={p} stroke="#333" strokeWidth={3 / scale} lineCap="round" lineJoin="round" hitStrokeWidth={16 / scale} /> : null; })}
 
                 {wires.map(w => w.bendPoints.map((bp, i) => (
-                    <Circle key={`${w.uuid}-bp-${i}`} x={bp.x} y={bp.y} radius={6} fill="#4f7cff" stroke="#2952cc" strokeWidth={2}
-                        draggable={!dw} onDragMove={e => setWires(p => p.map(ww => { if (ww.uuid !== w.uuid) return ww; const nb = [...ww.bendPoints]; nb[i] = { x: e.target.x(), y: e.target.y() }; return { ...ww, bendPoints: nb }; }))}
+                    <Circle key={`${w.uuid}-bp-${i}`} x={bp.x} y={bp.y} radius={6 / scale} fill="#4f7cff" stroke="#2952cc" strokeWidth={2 / scale}
+                        draggable={!dw}
+                        onDragMove={e => setWires(p => p.map(ww => { if (ww.uuid !== w.uuid) return ww; const nb = [...ww.bendPoints]; nb[i] = { x: e.target.x(), y: e.target.y() }; return { ...ww, bendPoints: nb }; }))}
+                        onDragEnd={() => onBPDragEnd(w.uuid, i)}
                         onContextMenu={e => onBPCtx(w.uuid, i, e)} onClick={e => { e.cancelBubble = true; }}
-                        onMouseEnter={e => { (e.target as any).radius(9); e.target.getLayer()?.batchDraw(); }} onMouseLeave={e => { (e.target as any).radius(6); e.target.getLayer()?.batchDraw(); }} />
+                        onMouseEnter={e => { (e.target as any).radius(9 / scale); e.target.getLayer()?.batchDraw(); }}
+                        onMouseLeave={e => { (e.target as any).radius(6 / scale); e.target.getLayer()?.batchDraw(); }} />
                 )))}
 
                 {nodes.map(n => (
-                    <Circle key={`n-${n.uuid}`} x={n.x} y={n.y} radius={8} fill="#22c55e" stroke="#15803d" strokeWidth={2}
-                        draggable={!dw} onDragMove={e => setNodes(p => p.map(nd => nd.uuid === n.uuid ? { ...nd, x: e.target.x(), y: e.target.y() } : nd))}
+                    <Circle key={`n-${n.uuid}`} x={n.x} y={n.y} radius={8 / scale} fill="#22c55e" stroke="#15803d" strokeWidth={2 / scale}
+                        draggable={!dw}
+                        onDragMove={e => setNodes(p => p.map(nd => nd.uuid === n.uuid ? { ...nd, x: e.target.x(), y: e.target.y() } : nd))}
+                        onDragEnd={() => onNodeDragEnd(n.uuid)}
                         onContextMenu={e => onNodeCtx(n, e)} onClick={e => onNodeClick(n, e)}
-                        onMouseEnter={e => { (e.target as any).radius(11); e.target.getLayer()?.batchDraw(); }} onMouseLeave={e => { (e.target as any).radius(8); e.target.getLayer()?.batchDraw(); }} />
+                        onMouseEnter={e => { (e.target as any).radius(11 / scale); e.target.getLayer()?.batchDraw(); }}
+                        onMouseLeave={e => { (e.target as any).radius(8 / scale); e.target.getLayer()?.batchDraw(); }} />
                 ))}
 
-                {dw && (() => { const p = drawPts(); return p.length >= 4 ? <Line points={p} stroke="#999" strokeWidth={2} dash={[8, 4]} lineCap="round" lineJoin="round" /> : null; })()}
-                {dw && dw.bendPoints.map((b, i) => <Circle key={`db-${i}`} x={b.x} y={b.y} radius={4} fill="#666" />)}
+                {dw && (() => { const p = drawPts(); return p.length >= 4 ? <Line points={p} stroke="#999" strokeWidth={2 / scale} dash={[8 / scale, 4 / scale]} lineCap="round" lineJoin="round" /> : null; })()}
+                {dw && dw.bendPoints.map((b, i) => <Circle key={`db-${i}`} x={b.x} y={b.y} radius={4 / scale} fill="#666" />)}
 
                 {items.filter(i => i.type === "resistor").map(it => (
                     <Resistor key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 100}
                         items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
-                        selected={selectedItem === it.uuid} />
+                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd} />
                 ))}
                 {items.filter(i => i.type === "battery").map(it => (
                     <Battery key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 5}
                         items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
-                        selected={selectedItem === it.uuid} />
+                        selected={selectedItem === it.uuid} onDragEnd={onItemDragEnd} />
                 ))}
 
                 {ctx.visible && <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={closeCtx} />}
             </Layer>
         </Stage>
         {selItem && <PropertyPanel item={selItem} setItems={setItems} onClose={() => setSelectedItem(null)} />}
+        <GridSettings gridSize={gridSize} setGridSize={setGridSize} gridMode={gridMode} setGridMode={setGridMode} snapEnabled={snapEnabled} setSnapEnabled={setSnapEnabled} scale={scale} onShowHelp={() => setShowHelp(true)} />
+        {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
         </>
     );
 }

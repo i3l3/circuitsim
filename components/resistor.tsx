@@ -7,13 +7,14 @@ import Konva from "konva";
 
 const ZZ = [0, 25, 20, 25, 25, 8, 35, 42, 45, 8, 55, 42, 65, 8, 75, 42, 80, 25, 100, 25];
 
-const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected }: {
+const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected, onDragEnd }: {
     uuid: string; x: number; y: number; rotation: number; value: number;
     items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
     drawingWire: DrawingWire | null;
     onTerminalMouseDown: (t: Terminal, p: { x: number; y: number }, e: Konva.KonvaEventObject<MouseEvent>) => void;
     onBodyClick: (uuid: string) => void;
     selected: boolean;
+    onDragEnd: (uuid: string) => void;
 }) => {
     const [onA, setOnA] = useState(false);
     const [onB, setOnB] = useState(false);
@@ -33,7 +34,8 @@ const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, o
 
     return (
         <Group x={x + 50} y={y + 25} offsetX={50} offsetY={25} rotation={rotation}
-               draggable={!onA && !onB && !isD} onDragStart={onDS} onDragMove={onDM}>
+               draggable={!onA && !onB && !isD} onDragStart={onDS} onDragMove={onDM}
+               onDragEnd={() => onDragEnd(uuid)}>
             <Rect x={0} y={0} width={100} height={50} fill="transparent"
                   stroke={selected ? "#3b82f6" : "transparent"} strokeWidth={2} cornerRadius={4}
                   onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid); }} />

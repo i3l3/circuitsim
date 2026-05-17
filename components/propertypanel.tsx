@@ -18,7 +18,7 @@ const PropertyPanel = ({ item, setItems, onClose }: {
     return (
         <div style={{
             position: "fixed", top: 60, right: 20, width: 220, padding: 16,
-            background: "#fff", border: "1px solid #ccc", borderRadius: 8,
+            background: "#fff", color: "#000", border: "1px solid #ccc", borderRadius: 8,
             boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 1000, fontFamily: "sans-serif"
         }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
