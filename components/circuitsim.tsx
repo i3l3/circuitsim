@@ -1,496 +1,312 @@
 "use client";
 
-import {Circle, Group, Layer, Line, Rect, Stage, Text} from "react-konva";
+import {Circle, Layer, Line, Rect, Stage, Text} from "react-konva";
 import {useCallback, useEffect, useRef, useState} from "react";
 import Konva from "konva";
 import Resistor from "@/components/resistor";
+import Battery from "@/components/battery";
 import ContextMenu, {ContextMenuItem} from "@/components/contextmenu";
+import PropertyPanel from "@/components/propertypanel";
 
 export interface Item {
-    uuid: string;
-    x: number;
-    y: number;
-    connectedA: string | null;
-    connectedB: string | null;
-    type: "resistor";
+    uuid: string; x: number; y: number; rotation: number;
+    connectedA: string | null; connectedB: string | null;
+    type: "resistor" | "battery"; value?: number;
 }
 
-export interface Point {
-    uuid: string;
-    x: number;
-    y: number;
-}
+export interface Point { uuid: string; x: number; y: number; }
+export interface ClickEvent { clicked: boolean; x: number; y: number; }
 
-export interface ClickEvent {
-    clicked: boolean;
-    x: number;
-    y: number;
-}
-
-/** Identifies a specific terminal on a component or a junction node */
 export type Terminal =
     | { type: "item"; itemUuid: string; side: "A" | "B" }
     | { type: "node"; nodeUuid: string };
 
-/** Junction node — a standalone point that wires can connect to */
-export interface WireNode {
-    uuid: string;
-    x: number;
-    y: number;
-}
+export interface WireNode { uuid: string; x: number; y: number; }
+export interface Wire { uuid: string; from: Terminal; to: Terminal; bendPoints: { x: number; y: number }[]; }
+export interface DrawingWire { from: Terminal; fromPos: { x: number; y: number }; bendPoints: { x: number; y: number }[]; mode: "click" | "drag"; }
 
-/** A wire connecting two terminals, with optional bend points */
-export interface Wire {
-    uuid: string;
-    from: Terminal;
-    to: Terminal;
-    bendPoints: { x: number; y: number }[];
-}
+interface CtxMenuState { visible: boolean; x: number; y: number; items: ContextMenuItem[]; }
 
-/** State while actively drawing a wire */
-export interface DrawingWire {
-    from: Terminal;
-    fromPos: { x: number; y: number };
-    bendPoints: { x: number; y: number }[];
-}
-
-/** Context menu state */
-interface ContextMenuState {
-    visible: boolean;
-    x: number;
-    y: number;
-    items: ContextMenuItem[];
-}
-
-/** Check if two terminals are the same */
-function terminalsEqual(a: Terminal, b: Terminal): boolean {
-    if (a.type === "item" && b.type === "item") {
-        return a.itemUuid === b.itemUuid && a.side === b.side;
-    }
-    if (a.type === "node" && b.type === "node") {
-        return a.nodeUuid === b.nodeUuid;
-    }
+function termsEq(a: Terminal, b: Terminal): boolean {
+    if (a.type === "item" && b.type === "item") return a.itemUuid === b.itemUuid && a.side === b.side;
+    if (a.type === "node" && b.type === "node") return a.nodeUuid === b.nodeUuid;
     return false;
 }
-
-/** Helper: distance from point P to line segment AB */
-function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return Math.hypot(px - ax, py - ay);
-    let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-    const projX = ax + t * dx;
-    const projY = ay + t * dy;
-    return Math.hypot(px - projX, py - projY);
+function dist2seg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    if (l2 === 0) return Math.hypot(px - ax, py - ay);
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+function getItemTermPos(item: Item, side: "A" | "B"): { x: number; y: number } {
+    const cx = item.x + 50, cy = item.y + 25, rad = (item.rotation * Math.PI) / 180;
+    const lx = side === "A" ? -50 : 50;
+    return { x: cx + lx * Math.cos(rad), y: cy + lx * Math.sin(rad) };
 }
 
 const CircuitSim = () => {
-    const [dimensions, setDimensions] = useState(() => {
-        if (typeof window !== "undefined") {
-            return { width: window.innerWidth, height: window.innerHeight };
-        }
-        return { width: 0, height: 0 };
-    });
+    const [dims, setDims] = useState(() => typeof window !== "undefined" ? { w: window.innerWidth, h: window.innerHeight } : { w: 0, h: 0 });
     const [items, setItems] = useState<Item[]>([
-        {uuid: crypto.randomUUID(), x: 50, y: 100, connectedA: null, connectedB: null, type: "resistor"},
-        {uuid: crypto.randomUUID(), x: 70, y: 200, connectedA: null, connectedB: null, type: "resistor"},
+        { uuid: crypto.randomUUID(), x: 50, y: 100, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 },
+        { uuid: crypto.randomUUID(), x: 70, y: 200, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 200 },
     ]);
-    const [points, setPoints] = useState<Point[]>([]);
-    const [clicked, setClicked] = useState<ClickEvent>({ clicked: false, x: 0, y: 0 });
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
+    const [mpos, setMpos] = useState({ x: 0, y: 0 });
     const [wires, setWires] = useState<Wire[]>([]);
     const [nodes, setNodes] = useState<WireNode[]>([]);
-    const [drawingWire, setDrawingWire] = useState<DrawingWire | null>(null);
-    const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, items: [] });
+    const [dw, setDw] = useState<DrawingWire | null>(null);
+    const [ctx, setCtx] = useState<CtxMenuState>({ visible: false, x: 0, y: 0, items: [] });
+    const [selectedItem, setSelectedItem] = useState<string | null>(null);
 
     const stageRef = useRef<Konva.Stage>(null);
-    const backgroundRef = useRef<Konva.Rect>(null);
+    const bgRef = useRef<Konva.Rect>(null);
+    const pendRef = useRef<{ terminal: Terminal; pos: { x: number; y: number }; ms: { x: number; y: number } } | null>(null);
+    // Track if shift-bend was just added in drag mode to skip mouseUp completion
+    const shiftBendRef = useRef(false);
 
-    /** Resolve terminal position */
-    const resolveTerminalPos = useCallback((terminal: Terminal): { x: number; y: number } | null => {
-        if (terminal.type === "item") {
-            const item = items.find(i => i.uuid === terminal.itemUuid);
-            if (!item) return null;
-            if (terminal.side === "A") return { x: item.x, y: item.y + 25 };
-            return { x: item.x + 100, y: item.y + 25 };
-        } else {
-            const node = nodes.find(n => n.uuid === terminal.nodeUuid);
-            if (!node) return null;
-            return { x: node.x, y: node.y };
-        }
+    const resolvePos = useCallback((t: Terminal) => {
+        if (t.type === "item") { const it = items.find(i => i.uuid === t.itemUuid); return it ? getItemTermPos(it, t.side) : null; }
+        const n = nodes.find(nd => nd.uuid === t.nodeUuid); return n ? { x: n.x, y: n.y } : null;
     }, [items, nodes]);
 
-    useEffect(() => {
-        const handleResize = () => {
-            setDimensions({ width: window.innerWidth, height: window.innerHeight });
-        };
-        window.addEventListener("resize", handleResize);
-        return () => window.removeEventListener("resize", handleResize);
-    }, []);
-
-    useEffect(() => {
-        if (stageRef.current) {
-            const container = stageRef.current.container();
-            container.style.backgroundColor = 'green';
-        }
-    }, []);
-
-    const handleDragMove = () => {
-        if (backgroundRef.current) {
-            backgroundRef.current.absolutePosition({ x: 0, y: 0 });
-        }
-    };
-
-    const handleStagePointerMove = () => {
-        if (!stageRef.current) return;
-        const pos = stageRef.current.getPointerPosition();
-        if (pos) setMousePos({ x: pos.x, y: pos.y });
-    };
-
-    const closeContextMenu = useCallback(() => {
-        setContextMenu(prev => ({ ...prev, visible: false }));
-    }, []);
-
-    /** Find wire closest to a point */
-    const findWireAtPos = useCallback((px: number, py: number, threshold: number = 8): { wire: Wire; segmentIndex: number } | null => {
-        let bestDist = Infinity;
-        let bestResult: { wire: Wire; segmentIndex: number } | null = null;
-
-        for (const wire of wires) {
-            const fromPos = resolveTerminalPos(wire.from);
-            const toPos = resolveTerminalPos(wire.to);
-            if (!fromPos || !toPos) continue;
-
-            const allPts = [fromPos, ...wire.bendPoints, toPos];
-            for (let i = 0; i < allPts.length - 1; i++) {
-                const d = distToSegment(px, py, allPts[i].x, allPts[i].y, allPts[i + 1].x, allPts[i + 1].y);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestResult = { wire, segmentIndex: i };
-                }
-            }
-        }
-        if (bestDist <= threshold && bestResult) return bestResult;
+    const findTermAt = useCallback((px: number, py: number, th = 15) => {
+        for (const it of items) for (const s of ["A", "B"] as const) { const p = getItemTermPos(it, s); if (Math.hypot(px - p.x, py - p.y) < th) return { terminal: { type: "item" as const, itemUuid: it.uuid, side: s }, pos: p }; }
+        for (const n of nodes) if (Math.hypot(px - n.x, py - n.y) < th) return { terminal: { type: "node" as const, nodeUuid: n.uuid }, pos: { x: n.x, y: n.y } };
         return null;
-    }, [wires, resolveTerminalPos]);
+    }, [items, nodes]);
 
-    /** Called from any terminal click (item terminal or node) */
-    const handleTerminalClick = (terminal: Terminal, pos: { x: number; y: number }) => {
-        if (contextMenu.visible) { closeContextMenu(); return; }
-
-        if (!drawingWire) {
-            setDrawingWire({ from: terminal, fromPos: pos, bendPoints: [] });
-        } else {
-            if (terminalsEqual(drawingWire.from, terminal)) {
-                setDrawingWire(null);
-                return;
-            }
-            const newWire: Wire = {
-                uuid: crypto.randomUUID(),
-                from: drawingWire.from,
-                to: terminal,
-                bendPoints: [...drawingWire.bendPoints],
-            };
-            setWires(prev => [...prev, newWire]);
-            setDrawingWire(null);
+    const findWireAt = useCallback((px: number, py: number, th = 8) => {
+        let bd = Infinity, br: { wire: Wire; si: number } | null = null;
+        for (const w of wires) {
+            const fp = resolvePos(w.from), tp = resolvePos(w.to); if (!fp || !tp) continue;
+            const pts = [fp, ...w.bendPoints, tp];
+            for (let i = 0; i < pts.length - 1; i++) { const d = dist2seg(px, py, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y); if (d < bd) { bd = d; br = { wire: w, si: i }; } }
         }
-    };
+        return bd <= th && br ? br : null;
+    }, [wires, resolvePos]);
 
-    /** Stage click */
-    const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-        if (contextMenu.visible) { closeContextMenu(); return; }
-        if (!drawingWire) return;
-
-        if (e.evt.shiftKey) {
-            if (!stageRef.current) return;
-            const pos = stageRef.current.getPointerPosition();
-            if (pos) {
-                setDrawingWire(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, { x: pos.x, y: pos.y }] } : prev);
-            }
-        } else {
-            const target = e.target;
-            if (target === backgroundRef.current || target === stageRef.current) {
-                setDrawingWire(null);
-            }
+    const completeWireAt = useCallback((px: number, py: number, drawing: DrawingWire): boolean => {
+        const th = findTermAt(px, py, 15);
+        if (th && !termsEq(drawing.from, th.terminal)) {
+            setWires(p => [...p, { uuid: crypto.randomUUID(), from: drawing.from, to: th.terminal, bendPoints: [...drawing.bendPoints] }]);
+            setDw(null); return true;
         }
-    };
+        const wh = findWireAt(px, py, 12);
+        if (wh) {
+            const nn: WireNode = { uuid: crypto.randomUUID(), x: px, y: py };
+            const nt: Terminal = { type: "node", nodeUuid: nn.uuid };
+            const ow = wh.wire, bb = ow.bendPoints.slice(0, wh.si), ba = ow.bendPoints.slice(wh.si);
+            setNodes(p => [...p, nn]);
+            setWires(p => [...p.filter(w => w.uuid !== ow.uuid),
+                { uuid: crypto.randomUUID(), from: ow.from, to: nt, bendPoints: bb },
+                { uuid: crypto.randomUUID(), from: nt, to: ow.to, bendPoints: ba },
+                { uuid: crypto.randomUUID(), from: drawing.from, to: nt, bendPoints: [...drawing.bendPoints] }]);
+            setDw(null); return true;
+        }
+        return false;
+    }, [findTermAt, findWireAt]);
 
-    /** Right-click context menu */
-    const handleStageContextMenu = (e: Konva.KonvaEventObject<PointerEvent>) => {
-        e.evt.preventDefault();
-        if (drawingWire) { setDrawingWire(null); return; }
+    useEffect(() => { const h = () => setDims({ w: window.innerWidth, h: window.innerHeight }); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
+    useEffect(() => { if (stageRef.current) stageRef.current.container().style.backgroundColor = "green"; }, []);
+
+    useEffect(() => {
+        const h = (e: KeyboardEvent) => {
+            if (e.key === "Escape") { setDw(null); pendRef.current = null; setCtx(p => ({ ...p, visible: false })); setSelectedItem(null); }
+            if ((e.key === "r" || e.key === "R") && !selectedItem) {
+                setItems(p => p.map(it => { const cx = it.x + 50, cy = it.y + 25; return Math.hypot(mpos.x - cx, mpos.y - cy) < 60 ? { ...it, rotation: (it.rotation + 90) % 360 } : it; }));
+            }
+        };
+        window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
+    }, [mpos, selectedItem]);
+
+    const closeCtx = useCallback(() => setCtx(p => ({ ...p, visible: false })), []);
+
+    const onPointerMove = useCallback(() => {
         if (!stageRef.current) return;
-        const pos = stageRef.current.getPointerPosition();
-        if (!pos) return;
-
-        const wireHit = findWireAtPos(pos.x, pos.y, 10);
-        const clickedItem = items.find(item =>
-            pos.x >= item.x && pos.x <= item.x + 100 && pos.y >= item.y && pos.y <= item.y + 50
-        );
-
-        const menuItems: ContextMenuItem[] = [];
-
-        menuItems.push({
-            label: "➕ 저항 추가",
-            onClick: () => {
-                setItems(prev => [...prev, {
-                    uuid: crypto.randomUUID(), x: pos.x - 50, y: pos.y - 25,
-                    connectedA: null, connectedB: null, type: "resistor",
-                }]);
-            },
-        });
-
-        if (clickedItem) {
-            menuItems.push({
-                label: "🗑️ 저항 삭제",
-                onClick: () => {
-                    setItems(prev => prev.filter(i => i.uuid !== clickedItem.uuid));
-                    setWires(prev => prev.filter(w => {
-                        const fromIsItem = w.from.type === "item" && w.from.itemUuid === clickedItem.uuid;
-                        const toIsItem = w.to.type === "item" && w.to.itemUuid === clickedItem.uuid;
-                        return !fromIsItem && !toIsItem;
-                    }));
-                },
-            });
+        const p = stageRef.current.getPointerPosition(); if (!p) return;
+        setMpos({ x: p.x, y: p.y });
+        if (pendRef.current && !dw) {
+            if (Math.hypot(p.x - pendRef.current.ms.x, p.y - pendRef.current.ms.y) > 5) {
+                setDw({ from: pendRef.current.terminal, fromPos: pendRef.current.pos, bendPoints: [], mode: "drag" });
+                pendRef.current = null;
+            }
         }
+    }, [dw]);
 
-        if (wireHit) {
-            menuItems.push({
-                label: "✂️ 선 삭제",
-                onClick: () => setWires(prev => prev.filter(w => w.uuid !== wireHit.wire.uuid)),
-            });
-            menuItems.push({
-                label: "📌 노드 추가",
-                onClick: () => {
-                    setWires(prev => prev.map(w => {
-                        if (w.uuid !== wireHit.wire.uuid) return w;
-                        const newBP = [...w.bendPoints];
-                        newBP.splice(wireHit.segmentIndex, 0, { x: pos.x, y: pos.y });
-                        return { ...w, bendPoints: newBP };
-                    }));
-                },
-            });
+    /** Terminal mouseDown */
+    const onTermMD = useCallback((terminal: Terminal, pos: { x: number; y: number }, _e: Konva.KonvaEventObject<MouseEvent>) => {
+        if (ctx.visible) { closeCtx(); return; }
+        if (dw) {
+            if (!termsEq(dw.from, terminal)) setWires(p => [...p, { uuid: crypto.randomUUID(), from: dw.from, to: terminal, bendPoints: [...dw.bendPoints] }]);
+            setDw(null); pendRef.current = null; return;
         }
+        if (!stageRef.current) return;
+        const mp = stageRef.current.getPointerPosition();
+        pendRef.current = { terminal, pos, ms: mp || pos };
+    }, [dw, ctx.visible, closeCtx]);
 
-        setContextMenu({ visible: true, x: pos.x, y: pos.y, items: menuItems });
-    };
+    /** Component body click → select for properties */
+    const onItemClick = useCallback((uuid: string) => {
+        if (dw) return; // don't select while drawing
+        setSelectedItem(prev => prev === uuid ? null : uuid);
+    }, [dw]);
 
-    /** Right-click on a bend point → split wire, create node, start drawing */
-    const handleBendPointContextMenu = (wireUuid: string, bpIndex: number, e: Konva.KonvaEventObject<PointerEvent>) => {
+    const onStageMouseUp = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
+        if (shiftBendRef.current) { shiftBendRef.current = false; return; }
+        if (pendRef.current) {
+            setDw({ from: pendRef.current.terminal, fromPos: pendRef.current.pos, bendPoints: [], mode: "click" });
+            pendRef.current = null; return;
+        }
+        if (dw && dw.mode === "drag") {
+            if (!stageRef.current) { setDw(null); return; }
+            const p = stageRef.current.getPointerPosition();
+            if (!p || !completeWireAt(p.x, p.y, dw)) setDw(null);
+        }
+    }, [dw, completeWireAt]);
+
+    /** Click mode: left-click adds bend point or completes on wire */
+    const onStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+        if (ctx.visible) { closeCtx(); return; }
+        if (!dw || dw.mode !== "click") return;
+        if (!stageRef.current) return;
+        const p = stageRef.current.getPointerPosition(); if (!p) return;
+
+        // Skip if near a terminal (will be handled by onTermMD)
+        if (findTermAt(p.x, p.y, 15)) return;
+        // Try auto-junction on wire
+        if (completeWireAt(p.x, p.y, dw)) return;
+        // Add bend point on any click
+        setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, { x: p.x, y: p.y }] } : prev);
+    }, [dw, ctx.visible, closeCtx, completeWireAt, findTermAt]);
+
+    /** Drag mode: shift+click adds bend point */
+    const onStageMD = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+        if (dw && dw.mode === "drag" && e.evt.shiftKey) {
+            if (!stageRef.current) return;
+            const p = stageRef.current.getPointerPosition();
+            if (p) {
+                shiftBendRef.current = true;
+                setDw(prev => prev ? { ...prev, bendPoints: [...prev.bendPoints, { x: p.x, y: p.y }] } : prev);
+            }
+        }
+    }, [dw]);
+
+    const onStageCtxMenu = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
         e.evt.preventDefault();
+        if (dw) { setDw(null); return; }
+        if (!stageRef.current) return;
+        const p = stageRef.current.getPointerPosition(); if (!p) return;
+        const wh = findWireAt(p.x, p.y, 10);
+        const ci = items.find(it => Math.hypot(p.x - (it.x + 50), p.y - (it.y + 25)) < 55);
+        const mi: ContextMenuItem[] = [];
+        mi.push({ label: "➕ 저항 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: p.x - 50, y: p.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "resistor", value: 100 }]) });
+        mi.push({ label: "🔋 전지 추가", onClick: () => setItems(pr => [...pr, { uuid: crypto.randomUUID(), x: p.x - 50, y: p.y - 25, rotation: 0, connectedA: null, connectedB: null, type: "battery", value: 5 }]) });
+        if (ci) mi.push({ label: "🗑️ 부품 삭제", onClick: () => { setItems(pr => pr.filter(i => i.uuid !== ci.uuid)); setWires(pr => pr.filter(w => !((w.from.type === "item" && w.from.itemUuid === ci.uuid) || (w.to.type === "item" && w.to.itemUuid === ci.uuid)))); if (selectedItem === ci.uuid) setSelectedItem(null); } });
+        if (wh) {
+            mi.push({ label: "✂️ 선 삭제", onClick: () => setWires(pr => pr.filter(w => w.uuid !== wh.wire.uuid)) });
+            mi.push({ label: "📌 노드 추가", onClick: () => setWires(pr => pr.map(w => { if (w.uuid !== wh.wire.uuid) return w; const bp = [...w.bendPoints]; bp.splice(wh.si, 0, { x: p.x, y: p.y }); return { ...w, bendPoints: bp }; })) });
+        }
+        setCtx({ visible: true, x: p.x, y: p.y, items: mi });
+    }, [dw, findWireAt, items, selectedItem]);
+
+    const onBPCtx = useCallback((wid: string, bi: number, e: Konva.KonvaEventObject<PointerEvent>) => {
+        e.evt.preventDefault(); e.cancelBubble = true;
+        if (dw) { setDw(null); return; }
+        const wire = wires.find(w => w.uuid === wid); if (!wire) return;
+        const bp = wire.bendPoints[bi];
+        setCtx({ visible: true, x: bp.x, y: bp.y, items: [
+            { label: "🔗 선 연결 시작", onClick: () => {
+                const nn: WireNode = { uuid: crypto.randomUUID(), x: bp.x, y: bp.y };
+                const nt: Terminal = { type: "node", nodeUuid: nn.uuid };
+                setNodes(p => [...p, nn]);
+                setWires(p => [...p.filter(w => w.uuid !== wire.uuid),
+                    { uuid: crypto.randomUUID(), from: wire.from, to: nt, bendPoints: wire.bendPoints.slice(0, bi) },
+                    { uuid: crypto.randomUUID(), from: nt, to: wire.to, bendPoints: wire.bendPoints.slice(bi + 1) }]);
+                setDw({ from: nt, fromPos: { x: bp.x, y: bp.y }, bendPoints: [], mode: "click" });
+            }},
+            { label: "🗑️ 노드 삭제", onClick: () => setWires(p => p.map(w => { if (w.uuid !== wid) return w; const nb = [...w.bendPoints]; nb.splice(bi, 1); return { ...w, bendPoints: nb }; })) },
+        ]});
+    }, [dw, wires]);
+
+    const onNodeCtx = useCallback((node: WireNode, e: Konva.KonvaEventObject<PointerEvent>) => {
+        e.evt.preventDefault(); e.cancelBubble = true;
+        if (dw) { setDw(null); return; }
+        const nt: Terminal = { type: "node", nodeUuid: node.uuid };
+        setCtx({ visible: true, x: node.x, y: node.y, items: [
+            { label: "🔗 선 연결 시작", onClick: () => setDw({ from: nt, fromPos: { x: node.x, y: node.y }, bendPoints: [], mode: "click" }) },
+            { label: "🗑️ 노드 삭제", onClick: () => { setNodes(p => p.filter(n => n.uuid !== node.uuid)); setWires(p => p.filter(w => !((w.from.type === "node" && w.from.nodeUuid === node.uuid) || (w.to.type === "node" && w.to.nodeUuid === node.uuid)))); } },
+        ]});
+    }, [dw]);
+
+    const onNodeClick = useCallback((node: WireNode, e: Konva.KonvaEventObject<MouseEvent>) => {
         e.cancelBubble = true;
-        if (drawingWire) { setDrawingWire(null); return; }
+        if (ctx.visible) { closeCtx(); return; }
+        if (!dw) return;
+        const t: Terminal = { type: "node", nodeUuid: node.uuid };
+        if (termsEq(dw.from, t)) { setDw(null); return; }
+        setWires(p => [...p, { uuid: crypto.randomUUID(), from: dw.from, to: t, bendPoints: [...dw.bendPoints] }]);
+        setDw(null);
+    }, [dw, ctx.visible, closeCtx]);
 
-        const wire = wires.find(w => w.uuid === wireUuid);
-        if (!wire) return;
-        const bp = wire.bendPoints[bpIndex];
+    const wirePts = useCallback((w: Wire) => {
+        const fp = resolvePos(w.from), tp = resolvePos(w.to); if (!fp || !tp) return [];
+        const pts = [fp.x, fp.y]; for (const b of w.bendPoints) pts.push(b.x, b.y); pts.push(tp.x, tp.y); return pts;
+    }, [resolvePos]);
 
-        const menuItems: ContextMenuItem[] = [
-            {
-                label: "🔗 선 연결 시작",
-                onClick: () => {
-                    // Create a junction node at this bend point
-                    const newNode: WireNode = { uuid: crypto.randomUUID(), x: bp.x, y: bp.y };
-                    setNodes(prev => [...prev, newNode]);
+    const drawPts = useCallback(() => {
+        if (!dw) return []; const fp = resolvePos(dw.from); if (!fp) return [];
+        const pts = [fp.x, fp.y]; for (const b of dw.bendPoints) pts.push(b.x, b.y); pts.push(mpos.x, mpos.y); return pts;
+    }, [dw, resolvePos, mpos]);
 
-                    // Split wire into two at this bend point
-                    const bendsBefore = wire.bendPoints.slice(0, bpIndex);
-                    const bendsAfter = wire.bendPoints.slice(bpIndex + 1);
-                    const nodeTerminal: Terminal = { type: "node", nodeUuid: newNode.uuid };
+    const selItem = selectedItem ? items.find(i => i.uuid === selectedItem) : null;
 
-                    const wire1: Wire = { uuid: crypto.randomUUID(), from: wire.from, to: nodeTerminal, bendPoints: bendsBefore };
-                    const wire2: Wire = { uuid: crypto.randomUUID(), from: nodeTerminal, to: wire.to, bendPoints: bendsAfter };
-
-                    setWires(prev => [...prev.filter(w => w.uuid !== wire.uuid), wire1, wire2]);
-
-                    // Start drawing from the new node
-                    setDrawingWire({ from: nodeTerminal, fromPos: { x: bp.x, y: bp.y }, bendPoints: [] });
-                },
-            },
-            {
-                label: "🗑️ 노드 삭제",
-                onClick: () => {
-                    setWires(prev => prev.map(w => {
-                        if (w.uuid !== wireUuid) return w;
-                        const newBP = [...w.bendPoints];
-                        newBP.splice(bpIndex, 1);
-                        return { ...w, bendPoints: newBP };
-                    }));
-                },
-            },
-        ];
-        setContextMenu({ visible: true, x: bp.x, y: bp.y, items: menuItems });
-    };
-
-    /** Right-click on an existing WireNode */
-    const handleNodeContextMenu = (node: WireNode, e: Konva.KonvaEventObject<PointerEvent>) => {
-        e.evt.preventDefault();
-        e.cancelBubble = true;
-        if (drawingWire) { setDrawingWire(null); return; }
-
-        const nodeTerminal: Terminal = { type: "node", nodeUuid: node.uuid };
-        const menuItems: ContextMenuItem[] = [
-            {
-                label: "🔗 선 연결 시작",
-                onClick: () => {
-                    setDrawingWire({ from: nodeTerminal, fromPos: { x: node.x, y: node.y }, bendPoints: [] });
-                },
-            },
-            {
-                label: "🗑️ 노드 삭제",
-                onClick: () => {
-                    setNodes(prev => prev.filter(n => n.uuid !== node.uuid));
-                    setWires(prev => prev.filter(w => {
-                        const fromIsNode = w.from.type === "node" && w.from.nodeUuid === node.uuid;
-                        const toIsNode = w.to.type === "node" && w.to.nodeUuid === node.uuid;
-                        return !fromIsNode && !toIsNode;
-                    }));
-                },
-            },
-        ];
-        setContextMenu({ visible: true, x: node.x, y: node.y, items: menuItems });
-    };
-
-    /** Click on a WireNode during drawing mode → complete wire */
-    const handleNodeClick = (node: WireNode, e: Konva.KonvaEventObject<MouseEvent>) => {
-        e.cancelBubble = true;
-        if (contextMenu.visible) { closeContextMenu(); return; }
-        const terminal: Terminal = { type: "node", nodeUuid: node.uuid };
-        handleTerminalClick(terminal, { x: node.x, y: node.y });
-    };
-
-    /** Drag a bend point */
-    const handleBendPointDragMove = (wireUuid: string, bpIndex: number, e: Konva.KonvaEventObject<DragEvent>) => {
-        const newX = e.target.x();
-        const newY = e.target.y();
-        setWires(prev => prev.map(w => {
-            if (w.uuid !== wireUuid) return w;
-            const newBP = [...w.bendPoints];
-            newBP[bpIndex] = { x: newX, y: newY };
-            return { ...w, bendPoints: newBP };
-        }));
-    };
-
-    /** Drag a WireNode */
-    const handleNodeDragMove = (nodeUuid: string, e: Konva.KonvaEventObject<DragEvent>) => {
-        const newX = e.target.x();
-        const newY = e.target.y();
-        setNodes(prev => prev.map(n => n.uuid === nodeUuid ? { ...n, x: newX, y: newY } : n));
-    };
-
-    /** Build flat points for a completed wire */
-    const getWirePoints = (wire: Wire): number[] => {
-        const fromPos = resolveTerminalPos(wire.from);
-        const toPos = resolveTerminalPos(wire.to);
-        if (!fromPos || !toPos) return [];
-        const pts: number[] = [fromPos.x, fromPos.y];
-        for (const bp of wire.bendPoints) pts.push(bp.x, bp.y);
-        pts.push(toPos.x, toPos.y);
-        return pts;
-    };
-
-    /** Build flat points for drawing preview */
-    const getDrawingWirePoints = (): number[] => {
-        if (!drawingWire) return [];
-        const fromPos = resolveTerminalPos(drawingWire.from);
-        if (!fromPos) return [];
-        const pts: number[] = [fromPos.x, fromPos.y];
-        for (const bp of drawingWire.bendPoints) pts.push(bp.x, bp.y);
-        pts.push(mousePos.x, mousePos.y);
-        return pts;
-    };
-
-    if (dimensions.width === 0) return null;
+    if (dims.w === 0) return null;
 
     return (
-        <Stage
-            width={window.innerWidth}
-            height={window.innerHeight}
-            ref={stageRef}
-            onDragMove={handleDragMove}
-            onPointerMove={handleStagePointerMove}
-            onClick={handleStageClick}
-            onContextMenu={handleStageContextMenu}
-        >
+        <>
+        <Stage width={window.innerWidth} height={window.innerHeight} ref={stageRef}
+            onDragMove={() => { if (bgRef.current) bgRef.current.absolutePosition({ x: 0, y: 0 }); }}
+            onPointerMove={onPointerMove} onClick={onStageClick}
+            onMouseDown={onStageMD} onMouseUp={onStageMouseUp} onContextMenu={onStageCtxMenu}>
             <Layer>
-                <Rect ref={backgroundRef} width={dimensions.width} height={dimensions.height} fill="white" />
-                <Text text="우클릭: 메뉴 | 빨간 점 클릭: 선 연결 | Shift+클릭: 꺾기" fontSize={13} fill="#888" />
+                <Rect ref={bgRef} width={dims.w} height={dims.h} fill="white" />
+                <Text text="우클릭: 메뉴 | 빨간 점: 선 연결 | 클릭: 꺾기 | R: 회전 | ESC: 취소" fontSize={13} fill="#888" x={5} y={5} />
 
-                {/* Completed wires */}
-                {wires.map(wire => {
-                    const pts = getWirePoints(wire);
-                    if (pts.length < 4) return null;
-                    return <Line key={wire.uuid} points={pts} stroke="#333" strokeWidth={3} lineCap="round" lineJoin="round" hitStrokeWidth={16} />;
-                })}
+                {wires.map(w => { const p = wirePts(w); return p.length >= 4 ? <Line key={w.uuid} points={p} stroke="#333" strokeWidth={3} lineCap="round" lineJoin="round" hitStrokeWidth={16} /> : null; })}
 
-                {/* Draggable bend point nodes */}
-                {wires.map(wire =>
-                    wire.bendPoints.map((bp, i) => (
-                        <Circle
-                            key={`${wire.uuid}-bp-${i}`}
-                            x={bp.x} y={bp.y} radius={6}
-                            fill="#4f7cff" stroke="#2952cc" strokeWidth={2}
-                            draggable={!drawingWire}
-                            onDragMove={(e) => handleBendPointDragMove(wire.uuid, i, e)}
-                            onContextMenu={(e) => handleBendPointContextMenu(wire.uuid, i, e)}
-                            onClick={(e) => { e.cancelBubble = true; }}
-                            onMouseEnter={(e) => { (e.target as any).radius(9); e.target.getLayer()?.batchDraw(); const c = e.target.getStage()?.container(); if (c) c.style.cursor = "grab"; }}
-                            onMouseLeave={(e) => { (e.target as any).radius(6); e.target.getLayer()?.batchDraw(); const c = e.target.getStage()?.container(); if (c) c.style.cursor = "default"; }}
-                            onDragStart={(e) => { const c = e.target.getStage()?.container(); if (c) c.style.cursor = "grabbing"; }}
-                            onDragEnd={(e) => { const c = e.target.getStage()?.container(); if (c) c.style.cursor = "grab"; }}
-                        />
-                    ))
-                )}
+                {wires.map(w => w.bendPoints.map((bp, i) => (
+                    <Circle key={`${w.uuid}-bp-${i}`} x={bp.x} y={bp.y} radius={6} fill="#4f7cff" stroke="#2952cc" strokeWidth={2}
+                        draggable={!dw} onDragMove={e => setWires(p => p.map(ww => { if (ww.uuid !== w.uuid) return ww; const nb = [...ww.bendPoints]; nb[i] = { x: e.target.x(), y: e.target.y() }; return { ...ww, bendPoints: nb }; }))}
+                        onContextMenu={e => onBPCtx(w.uuid, i, e)} onClick={e => { e.cancelBubble = true; }}
+                        onMouseEnter={e => { (e.target as any).radius(9); e.target.getLayer()?.batchDraw(); }} onMouseLeave={e => { (e.target as any).radius(6); e.target.getLayer()?.batchDraw(); }} />
+                )))}
 
-                {/* Junction WireNodes (green) */}
-                {nodes.map(node => (
-                    <Circle
-                        key={`node-${node.uuid}`}
-                        x={node.x} y={node.y} radius={8}
-                        fill="#22c55e" stroke="#15803d" strokeWidth={2}
-                        draggable={!drawingWire}
-                        onDragMove={(e) => handleNodeDragMove(node.uuid, e)}
-                        onContextMenu={(e) => handleNodeContextMenu(node, e)}
-                        onClick={(e) => handleNodeClick(node, e)}
-                        onMouseEnter={(e) => { (e.target as any).radius(11); e.target.getLayer()?.batchDraw(); const c = e.target.getStage()?.container(); if (c) c.style.cursor = drawingWire ? "pointer" : "grab"; }}
-                        onMouseLeave={(e) => { (e.target as any).radius(8); e.target.getLayer()?.batchDraw(); const c = e.target.getStage()?.container(); if (c) c.style.cursor = "default"; }}
-                        onDragStart={(e) => { const c = e.target.getStage()?.container(); if (c) c.style.cursor = "grabbing"; }}
-                        onDragEnd={(e) => { const c = e.target.getStage()?.container(); if (c) c.style.cursor = "grab"; }}
-                    />
+                {nodes.map(n => (
+                    <Circle key={`n-${n.uuid}`} x={n.x} y={n.y} radius={8} fill="#22c55e" stroke="#15803d" strokeWidth={2}
+                        draggable={!dw} onDragMove={e => setNodes(p => p.map(nd => nd.uuid === n.uuid ? { ...nd, x: e.target.x(), y: e.target.y() } : nd))}
+                        onContextMenu={e => onNodeCtx(n, e)} onClick={e => onNodeClick(n, e)}
+                        onMouseEnter={e => { (e.target as any).radius(11); e.target.getLayer()?.batchDraw(); }} onMouseLeave={e => { (e.target as any).radius(8); e.target.getLayer()?.batchDraw(); }} />
                 ))}
 
-                {/* Drawing preview */}
-                {drawingWire && (() => {
-                    const pts = getDrawingWirePoints();
-                    if (pts.length < 4) return null;
-                    return <Line points={pts} stroke="#999" strokeWidth={2} dash={[8, 4]} lineCap="round" lineJoin="round" />;
-                })()}
+                {dw && (() => { const p = drawPts(); return p.length >= 4 ? <Line points={p} stroke="#999" strokeWidth={2} dash={[8, 4]} lineCap="round" lineJoin="round" /> : null; })()}
+                {dw && dw.bendPoints.map((b, i) => <Circle key={`db-${i}`} x={b.x} y={b.y} radius={4} fill="#666" />)}
 
-                {drawingWire && drawingWire.bendPoints.map((bp, i) => (
-                    <Circle key={`drawing-bp-${i}`} x={bp.x} y={bp.y} radius={4} fill="#666" />
+                {items.filter(i => i.type === "resistor").map(it => (
+                    <Resistor key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 100}
+                        items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
+                        selected={selectedItem === it.uuid} />
+                ))}
+                {items.filter(i => i.type === "battery").map(it => (
+                    <Battery key={it.uuid} uuid={it.uuid} x={it.x} y={it.y} rotation={it.rotation} value={it.value ?? 5}
+                        items={items} setItems={setItems} drawingWire={dw} onTerminalMouseDown={onTermMD} onBodyClick={onItemClick}
+                        selected={selectedItem === it.uuid} />
                 ))}
 
-                {/* Resistors */}
-                {items.filter((item) => item.type == "resistor").map((item) => (
-                    <Resistor key={item.uuid}
-                              uuid={item.uuid} x={item.x} y={item.y}
-                              clicked={clicked} setClicked={setClicked}
-                              items={items} setItems={setItems}
-                              drawingWire={drawingWire}
-                              onTerminalClick={handleTerminalClick}
-                    />
-                ))}
-
-                {/* Context menu on top */}
-                {contextMenu.visible && (
-                    <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={closeContextMenu} />
-                )}
+                {ctx.visible && <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={closeCtx} />}
             </Layer>
         </Stage>
-    )
+        {selItem && <PropertyPanel item={selItem} setItems={setItems} onClose={() => setSelectedItem(null)} />}
+        </>
+    );
 }
 
 export default CircuitSim;

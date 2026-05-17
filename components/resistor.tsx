@@ -1,116 +1,50 @@
 "use client";
 
-import {Circle, Group, Line, Rect} from "react-konva";
+import {Circle, Group, Line, Rect, Text} from "react-konva";
 import {Dispatch, SetStateAction, useRef, useState} from "react";
-import {ClickEvent, DrawingWire, Item, Terminal} from "@/components/circuitsim";
+import {DrawingWire, Item, Terminal} from "@/components/circuitsim";
 import Konva from "konva";
 
-/** Standard US-style zigzag resistor symbol points (relative to group origin).
- *  Total width: 100px, centered vertically at y=25.
- *  Lead lines on each side, zigzag body in the center.
- */
-const ZIGZAG_POINTS = [
-    0, 25,    // left terminal
-    20, 25,   // start of body
-    25, 8,    // peak up
-    35, 42,   // valley down
-    45, 8,    // peak up
-    55, 42,   // valley down
-    65, 8,    // peak up
-    75, 42,   // valley down
-    80, 25,   // end of body
-    100, 25,  // right terminal
-];
+const ZZ = [0, 25, 20, 25, 25, 8, 35, 42, 45, 8, 55, 42, 65, 8, 75, 42, 80, 25, 100, 25];
 
-const Resistor = ({
-        uuid, x, y, clicked, setClicked, items, setItems, drawingWire, onTerminalClick
-    }: {
-        uuid: string,
-        x: number,
-        y: number,
-        clicked: ClickEvent,
-        setClicked: Dispatch<SetStateAction<ClickEvent>>,
-        items: Item[],
-        setItems: Dispatch<SetStateAction<Item[]>>,
-        drawingWire: DrawingWire | null,
-        onTerminalClick: (terminal: Terminal, pos: { x: number; y: number }) => void,
-    }) => {
+const Resistor = ({ uuid, x, y, rotation, value, items, setItems, drawingWire, onTerminalMouseDown, onBodyClick, selected }: {
+    uuid: string; x: number; y: number; rotation: number; value: number;
+    items: Item[]; setItems: Dispatch<SetStateAction<Item[]>>;
+    drawingWire: DrawingWire | null;
+    onTerminalMouseDown: (t: Terminal, p: { x: number; y: number }, e: Konva.KonvaEventObject<MouseEvent>) => void;
+    onBodyClick: (uuid: string) => void;
+    selected: boolean;
+}) => {
     const [onA, setOnA] = useState(false);
     const [onB, setOnB] = useState(false);
-    const [radiusA, setRadiusA] = useState(5);
-    const [radiusB, setRadiusB] = useState(5);
-    const dragStartPos = useRef({ x: 0, y: 0 });
+    const [rA, setRA] = useState(5);
+    const [rB, setRB] = useState(5);
+    const dsp = useRef({ x: 0, y: 0 });
+    const isD = drawingWire !== null;
 
-    const isDrawing = drawingWire !== null;
-
-    const handlePointerMoveA = () => { setRadiusA(10); setOnA(true); };
-    const handlePointerMoveB = () => { setRadiusB(10); setOnB(true); };
-    const handlePointerMoveAOut = () => { setRadiusA(5); setOnA(false); };
-    const handlePointerMoveBOut = () => { setRadiusB(5); setOnB(false); };
-
-    const handleClickA = (e: Konva.KonvaEventObject<MouseEvent>) => {
-        e.cancelBubble = true;
-        const terminal: Terminal = { type: "item", itemUuid: uuid, side: "A" };
-        onTerminalClick(terminal, { x: x, y: y + 25 });
+    const onDS = (e: Konva.KonvaEventObject<DragEvent>) => { dsp.current = { x: e.target.x(), y: e.target.y() }; };
+    const onDM = (e: Konva.KonvaEventObject<DragEvent>) => {
+        const cx = e.target.x(), cy = e.target.y(), dx = cx - dsp.current.x, dy = cy - dsp.current.y;
+        setItems(p => p.map(it => it.uuid === uuid ? { ...it, x: it.x + dx, y: it.y + dy } : it));
+        dsp.current = { x: cx, y: cy };
     };
-    const handleClickB = (e: Konva.KonvaEventObject<MouseEvent>) => {
-        e.cancelBubble = true;
-        const terminal: Terminal = { type: "item", itemUuid: uuid, side: "B" };
-        onTerminalClick(terminal, { x: x + 100, y: y + 25 });
-    };
-
-    const handleDragStart = (e: Konva.KonvaEventObject<DragEvent>) => {
-        dragStartPos.current = { x: e.target.x(), y: e.target.y() };
-    };
-    const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-        const currentX = e.target.x();
-        const currentY = e.target.y();
-        const deltaX = currentX - dragStartPos.current.x;
-        const deltaY = currentY - dragStartPos.current.y;
-
-        setItems(prev => prev.map(resistor => {
-            if (resistor.uuid === uuid) {
-                return { ...resistor, x: resistor.x + deltaX, y: resistor.y + deltaY };
-            }
-            return resistor;
-        }));
-        dragStartPos.current = { x: currentX, y: currentY };
-    };
-
-    const fillA = isDrawing && onA ? "#ff6666" : "red";
-    const fillB = isDrawing && onB ? "#ff6666" : "red";
+    const mdA = (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onTerminalMouseDown({ type: "item", itemUuid: uuid, side: "A" }, { x, y: y + 25 }, e); };
+    const mdB = (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onTerminalMouseDown({ type: "item", itemUuid: uuid, side: "B" }, { x: x + 100, y: y + 25 }, e); };
 
     return (
-        <Group x={x} y={y} draggable={!onA && !onB && !isDrawing} onDragStart={handleDragStart} onDragMove={handleDragMove}>
-            {/* Invisible hit area for dragging */}
-            <Rect x={0} y={0} width={100} height={50} fill="transparent" />
-
-            {/* Zigzag resistor symbol */}
-            <Line
-                points={ZIGZAG_POINTS}
-                stroke="#333"
-                strokeWidth={2.5}
-                lineCap="round"
-                lineJoin="round"
-                listening={false}
-            />
-
-            {/* Terminal A (left) */}
-            <Circle
-                x={0} y={25} radius={radiusA} fill={fillA}
-                onPointerMove={handlePointerMoveA}
-                onPointerOut={handlePointerMoveAOut}
-                onClick={handleClickA}
-            />
-            {/* Terminal B (right) */}
-            <Circle
-                x={100} y={25} radius={radiusB} fill={fillB}
-                onPointerMove={handlePointerMoveB}
-                onPointerOut={handlePointerMoveBOut}
-                onClick={handleClickB}
-            />
+        <Group x={x + 50} y={y + 25} offsetX={50} offsetY={25} rotation={rotation}
+               draggable={!onA && !onB && !isD} onDragStart={onDS} onDragMove={onDM}>
+            <Rect x={0} y={0} width={100} height={50} fill="transparent"
+                  stroke={selected ? "#3b82f6" : "transparent"} strokeWidth={2} cornerRadius={4}
+                  onClick={(e) => { e.cancelBubble = true; onBodyClick(uuid); }} />
+            <Line points={ZZ} stroke="#333" strokeWidth={2.5} lineCap="round" lineJoin="round" listening={false} />
+            <Text x={10} y={-14} text={`${value}Ω`} fontSize={12} fill="#555" listening={false} />
+            <Circle x={0} y={25} radius={rA} fill={isD && onA ? "#ff6666" : "red"}
+                onPointerMove={() => { setRA(10); setOnA(true); }} onPointerOut={() => { setRA(5); setOnA(false); }} onMouseDown={mdA} />
+            <Circle x={100} y={25} radius={rB} fill={isD && onB ? "#ff6666" : "red"}
+                onPointerMove={() => { setRB(10); setOnB(true); }} onPointerOut={() => { setRB(5); setOnB(false); }} onMouseDown={mdB} />
         </Group>
-    )
+    );
 }
 
 export default Resistor;
